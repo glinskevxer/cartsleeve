@@ -1,0 +1,38 @@
+{
+  "name": "cartsleeve",
+  "version": "0.14.0",
+  "private": true,
+  "description": "Music rotation scheduling, log finalisation and performance royalty reporting for a radio group",
+  "type": "module",
+  "engines": {
+    "node": ">=22.11 <23"
+  },
+  "bin": {
+    "cartsleeve": "./dist/cli/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "format": "prettier --write \"**/*.{ts,json,yml,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,json,yml,md}\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "verify-tree": "node --experimental-strip-types scripts/verify-tree.ts"
+  },
+  "dependencies": {
+    "commander": "13.1.0",
+    "zod": "3.24.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.19.0",
+    "@types/node": "22.10.7",
+    "@vitest/coverage-v8": "3.0.5",
+    "eslint": "9.19.0",
+    "prettier": "3.4.2",
+    "typescript": "5.7.3",
+    "typescript-eslint": "8.23.0",
+    "vitest": "3.0.5"
+  }
+}
