@@ -46,6 +46,17 @@ describe('parseCredits', () => {
     expect(parseCredits('   ')).toEqual([]);
   });
 
+  it('drops a name that normalises to nothing rather than keying it empty', () => {
+    expect(parseCredits('...')).toEqual([]);
+    expect(parseCredits('---')).toEqual([]);
+    expect(parseCredits('?')).toEqual([]);
+  });
+
+  it('does not let two punctuation only billings collide on an empty key', () => {
+    const keys = ['...', '&&&'].flatMap((billed) => parseCredits(billed).map((c) => c.key));
+    expect(keys).toEqual([]);
+  });
+
   it('splits on every feature marker it knows', () => {
     for (const marker of ['featuring', 'feat.', 'feat', 'ft.', 'ft', 'with', 'duet with']) {
       const credits = parseCredits(`Willie Nelson ${marker} Merle Haggard`);

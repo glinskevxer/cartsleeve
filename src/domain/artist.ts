@@ -88,8 +88,12 @@ export function parseCredits(billed: string): Credit[] {
   const { primary, rest } = splitOnMarker(trimmed);
   const credits: Credit[] = [];
   const primaryName = primary.trim();
-  if (primaryName.length > 0) {
-    credits.push({ key: artistKey(primaryName), name: primaryName, role: 'primary' });
+  const primaryKey = artistKey(primaryName);
+  // A name that normalises to nothing is punctuation, not an artist. Keeping it
+  // would give every such cart the same empty key, and they would then separate
+  // against each other as though they were the same act.
+  if (primaryKey.length > 0) {
+    credits.push({ key: primaryKey, name: primaryName, role: 'primary' });
   }
   if (rest.trim().length > 0) {
     for (const piece of rest.split(SECONDARY)) {
