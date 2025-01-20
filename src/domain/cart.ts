@@ -19,6 +19,8 @@ import { err, ok } from '../util/result.js';
 import type { Result } from '../util/result.js';
 import { formatCredits, parseCredits } from './artist.js';
 import type { Credit } from './artist.js';
+import { DEFAULT_TIMING, auditTiming, parseEndType } from './segue.js';
+import type { Timing } from './segue.js';
 
 export interface Cart {
   readonly number: CartNumber;
@@ -28,6 +30,7 @@ export interface Cart {
   readonly runtime: Tenths;
   readonly category: CategoryCode;
   readonly music: boolean;
+  readonly timing: Timing;
 }
 
 export interface CartInput {
@@ -36,6 +39,9 @@ export interface CartInput {
   readonly billed?: string;
   readonly runtime: string;
   readonly category?: string;
+  readonly intro?: string;
+  readonly endType?: string;
+  readonly tail?: string;
 }
 
 const CART = (n: number): string => codeFor('library', n);
@@ -63,12 +69,34 @@ export function makeCart(input: CartInput): Result<Cart, Problem[]> {
   if (music && billed.length === 0) {
     problems.push(error(CART(23), input.number, 'is a music cart with no artist'));
   }
+  const intro = input.intro === undefined ? ok(DEFAULT_TIMING.intro) : parseDuration(input.intro);
+  if (!intro.ok) {
+    problems.push(error(CART(29), input.number, `intro ${intro.error.reason}`));
+  }
+  const tail = input.tail === undefined ? ok(DEFAULT_TIMING.tail) : parseDuration(input.tail);
+  if (!tail.ok) {
+    problems.push(error(CART(30), input.number, `tail ${tail.error.reason}`));
+  }
+  const endType = input.endType === undefined ? 'cold' : parseEndType(input.endType);
+  if (endType === undefined) {
+    problems.push(
+      error(CART(31), input.number, 'has an end type that is not cold, fade or sustain'),
+    );
+  }
   const categoryText = input.category ?? (music ? 'A' : 'X');
   const category = parseCategoryCode(categoryText);
   if (!category.ok) {
     problems.push(error(CART(24), input.number, category.error.reason));
   }
-  if (!number.ok || !runtime.ok || !category.ok || problems.length > 0) {
+  if (
+    !number.ok ||
+    !runtime.ok ||
+    !category.ok ||
+    !intro.ok ||
+    !tail.ok ||
+    endType === undefined ||
+    problems.length > 0
+  ) {
     return err(problems);
   }
   return ok({
@@ -79,6 +107,7 @@ export function makeCart(input: CartInput): Result<Cart, Problem[]> {
     runtime: runtime.value,
     category: category.value,
     music,
+    timing: { intro: intro.value, endType, tail: tail.value },
   });
 }
 
@@ -106,6 +135,7 @@ export function auditCart(cart: Cart): Problem[] {
   if (cart.music && cart.credits.length === 0) {
     problems.push(warning(CART(27), cart.number, 'has an artist that parsed to nothing'));
   }
+  problems.push(...auditTiming(cart.number, cart.runtime, cart.timing));
   if (!cart.music && cart.category !== 'X') {
     problems.push(
       warning(CART(28), cart.number, 'is not music but is carded into a rotating category', {
