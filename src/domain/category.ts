@@ -15,10 +15,10 @@ import { parseCategoryCode } from '../util/ids.js';
 import type { CategoryCode } from '../util/ids.js';
 import { fromMinutes } from '../util/duration.js';
 import type { Tenths } from '../util/duration.js';
-import { codeFor, error } from '../util/problem.js';
+import { codeFor } from '../util/problem.js';
 import type { Problem } from '../util/problem.js';
-import { err, ok } from '../util/result.js';
 import type { Result } from '../util/result.js';
+import { Check, take } from '../util/check.js';
 
 export interface Separation {
   /** Minimum time between two carts by the same artist. */
@@ -65,60 +65,54 @@ export const DEFAULT_SEPARATION: Separation = {
 const CAT = (n: number): string => codeFor('library', n);
 
 export function makeCategory(input: CategoryInput): Result<Category, Problem[]> {
-  const problems: Problem[] = [];
-  const parsed = parseCategoryCode(input.code);
-  if (!parsed.ok) {
-    problems.push(error(CAT(10), input.code, parsed.error.reason));
-  }
+  const check = new Check();
+  const code = check.require(
+    parseCategoryCode(input.code),
+    CAT(10),
+    input.code,
+    (problem) => problem.reason,
+  );
   const name = input.name.trim();
-  if (name.length === 0) {
-    problems.push(error(CAT(11), input.code, 'has no name'));
-  }
+  check.ensure(name.length > 0, CAT(11), input.code, 'has no name');
   const packets = input.packets ?? 1;
-  if (!Number.isInteger(packets) || packets < 1) {
-    problems.push(error(CAT(12), input.code, 'has a packet count below one', { given: packets }));
-  }
-  const minutes: [keyof Separation, number | undefined][] = [
-    ['artist', input.artistMinutes],
-    ['title', input.titleMinutes],
-    ['recording', input.recordingMinutes],
-    ['sound', input.soundMinutes],
-  ];
-  for (const [field, value] of minutes) {
-    if (value !== undefined && value < 0) {
-      problems.push(
-        error(CAT(13), input.code, `has a negative ${field} separation`, { given: value }),
-      );
+  check.ensure(
+    Number.isInteger(packets) && packets >= 1,
+    CAT(12),
+    input.code,
+    'has a packet count below one',
+    { given: packets },
+  );
+  const given: Record<keyof Separation, number | undefined> = {
+    artist: input.artistMinutes,
+    title: input.titleMinutes,
+    recording: input.recordingMinutes,
+    sound: input.soundMinutes,
+  };
+  const separation: Record<string, Tenths> = {};
+  for (const field of Object.keys(given) as (keyof Separation)[]) {
+    const minutes = given[field];
+    if (minutes === undefined) {
+      separation[field] = DEFAULT_SEPARATION[field];
+      continue;
     }
+    check.ensure(minutes >= 0, CAT(13), input.code, `has a negative ${field} separation`, {
+      given: minutes,
+    });
+    separation[field] = fromMinutes(minutes);
   }
-  if (problems.length > 0 || !parsed.ok) {
-    return err(problems);
-  }
-  return ok({
-    code: parsed.value,
+  return check.result(() => ({
+    code: take(code, 'code'),
     name,
     packets,
     music: input.music ?? true,
     separation: {
-      artist:
-        input.artistMinutes === undefined
-          ? DEFAULT_SEPARATION.artist
-          : fromMinutes(input.artistMinutes),
-      title:
-        input.titleMinutes === undefined
-          ? DEFAULT_SEPARATION.title
-          : fromMinutes(input.titleMinutes),
-      recording:
-        input.recordingMinutes === undefined
-          ? DEFAULT_SEPARATION.recording
-          : fromMinutes(input.recordingMinutes),
-      sound:
-        input.soundMinutes === undefined
-          ? DEFAULT_SEPARATION.sound
-          : fromMinutes(input.soundMinutes),
+      artist: take(separation['artist'], 'artist'),
+      title: take(separation['title'], 'title'),
+      recording: take(separation['recording'], 'recording'),
+      sound: take(separation['sound'], 'sound'),
     },
     priority: input.priority ?? 50,
-  });
+  }));
 }
 
 /** The categories a music station is built on, before anyone customises them. */

@@ -19,10 +19,10 @@
 import { formatIsrc, parseIsrc } from '../util/ids.js';
 import type { Isrc } from '../util/ids.js';
 import { compareText } from '../util/ordering.js';
-import { codeFor, error, warning } from '../util/problem.js';
+import { codeFor, warning } from '../util/problem.js';
 import type { Problem } from '../util/problem.js';
-import { err, ok } from '../util/result.js';
 import type { Result } from '../util/result.js';
+import { Check, take } from '../util/check.js';
 
 export interface Recording {
   readonly isrc: Isrc;
@@ -68,40 +68,33 @@ export function makeRecording(
   input: RecordingInput,
   currentYear: number,
 ): Result<Recording, Problem[]> {
-  const problems: Problem[] = [];
-  const isrc = parseIsrc(input.isrc);
-  if (!isrc.ok) {
-    problems.push(error(REC(1), input.isrc, isrc.error.reason));
-  }
+  const check = new Check();
+  const isrc = check.require(
+    parseIsrc(input.isrc),
+    REC(1),
+    input.isrc,
+    (problem) => problem.reason,
+  );
   const label = input.label.trim();
-  if (label.length === 0) {
-    problems.push(error(REC(2), input.isrc, 'has no label, so nobody can be paid'));
-  }
+  check.ensure(label.length > 0, REC(2), input.isrc, 'has no label, so nobody can be paid');
   const key = titleKey(input.title);
-  if (key.length === 0) {
-    problems.push(error(REC(3), input.isrc, 'has a title that normalises to nothing'));
-  }
-  if (
-    !Number.isInteger(input.releaseYear) ||
-    input.releaseYear < EARLIEST_RELEASE_YEAR ||
-    input.releaseYear > currentYear
-  ) {
-    problems.push(
-      error(REC(4), input.isrc, 'has a release year outside anything plausible', {
-        given: input.releaseYear,
-      }),
-    );
-  }
-  if (problems.length > 0 || !isrc.ok) {
-    return err(problems);
-  }
-  return ok({
-    isrc: isrc.value,
+  check.ensure(key.length > 0, REC(3), input.isrc, 'has a title that normalises to nothing');
+  check.ensure(
+    Number.isInteger(input.releaseYear) &&
+      input.releaseYear >= EARLIEST_RELEASE_YEAR &&
+      input.releaseYear <= currentYear,
+    REC(4),
+    input.isrc,
+    'has a release year outside anything plausible',
+    { given: input.releaseYear },
+  );
+  return check.result(() => ({
+    isrc: take(isrc, 'isrc'),
     label,
     payee: (input.payee ?? label).trim(),
     releaseYear: input.releaseYear,
     titleKey: key,
-  });
+  }));
 }
 
 /**

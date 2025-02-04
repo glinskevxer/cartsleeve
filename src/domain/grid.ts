@@ -15,10 +15,10 @@
 import { HOURS_IN_WEEK, cellOf, dayOfCell, formatCell, hourOfCell } from './daypart.js';
 import type { WeekCell } from './daypart.js';
 import type { Clock } from './clock.js';
-import { codeFor, error, warning } from '../util/problem.js';
+import { codeFor } from '../util/problem.js';
 import type { Problem } from '../util/problem.js';
-import { err, ok } from '../util/result.js';
 import type { Result } from '../util/result.js';
+import { Check } from '../util/check.js';
 import { formatBroadcastDay } from '../util/time.js';
 import type { BroadcastDay } from '../util/time.js';
 
@@ -44,47 +44,53 @@ export function makeGrid(
   spans: readonly GridSpan[],
   clocks: readonly Clock[],
 ): Result<Grid, Problem[]> {
-  const problems: Problem[] = [];
+  const check = new Check();
   const trimmed = name.trim();
-  if (trimmed.length === 0) {
-    problems.push(error(GRD(50), name, 'has no name'));
-  }
+  check.ensure(trimmed.length > 0, GRD(50), name, 'has no name');
   const known = new Set(clocks.map((clock) => clock.name));
   const cells: (string | undefined)[] = Array.from({ length: HOURS_IN_WEEK }, () => undefined);
   for (const span of spans) {
-    if (!known.has(span.clock)) {
-      problems.push(
-        error(GRD(51), trimmed, `names a clock nothing defines`, { clock: span.clock }),
-      );
-      continue;
-    }
-    if (span.fromHour < 0 || span.toHour > 24 || span.fromHour >= span.toHour) {
-      problems.push(
-        error(GRD(52), trimmed, 'has an hour band that is empty or runs past the day', {
-          from: span.fromHour,
-          to: span.toHour,
-        }),
-      );
+    const clockOk = check.ensure(
+      known.has(span.clock),
+      GRD(51),
+      trimmed,
+      'names a clock nothing defines',
+      { clock: span.clock },
+    );
+    const bandOk = check.ensure(
+      span.fromHour >= 0 && span.toHour <= 24 && span.fromHour < span.toHour,
+      GRD(52),
+      trimmed,
+      'has an hour band that is empty or runs past the day',
+      { from: span.fromHour, to: span.toHour },
+    );
+    if (!clockOk || !bandOk) {
       continue;
     }
     for (const day of span.days) {
-      if (!Number.isInteger(day) || day < 0 || day > 6) {
-        problems.push(error(GRD(53), trimmed, 'names a day outside the week', { day }));
+      const dayOk = check.ensure(
+        Number.isInteger(day) && day >= 0 && day <= 6,
+        GRD(53),
+        trimmed,
+        'names a day outside the week',
+        { day },
+      );
+      if (!dayOk) {
         continue;
       }
       for (let hour = span.fromHour; hour < span.toHour; hour += 1) {
         const cell = cellOf(day, hour);
         const already = cells[cell];
-        if (already !== undefined && already !== span.clock) {
-          problems.push(
-            error(GRD(54), trimmed, `assigns ${formatCell(cell)} twice`, {
-              first: already,
-              second: span.clock,
-            }),
-          );
-          continue;
+        const free = check.ensure(
+          already === undefined || already === span.clock,
+          GRD(54),
+          trimmed,
+          `assigns ${formatCell(cell)} twice`,
+          { first: already ?? '', second: span.clock },
+        );
+        if (free) {
+          cells[cell] = span.clock;
         }
-        cells[cell] = span.clock;
       }
     }
   }
@@ -92,22 +98,15 @@ export function makeGrid(
     (out, value, index) => (value === undefined ? [...out, index] : out),
     [],
   );
-  if (missing.length > 0) {
-    problems.push(
-      error(GRD(55), trimmed, 'leaves hours of the week with no clock', {
-        count: missing.length,
-        first: formatCell(missing[0] ?? 0),
-      }),
-    );
-  }
-  if (problems.length > 0) {
-    return err(problems);
-  }
-  return ok({
+  check.ensure(missing.length === 0, GRD(55), trimmed, 'leaves hours of the week with no clock', {
+    count: missing.length,
+    first: formatCell(missing[0] ?? 0),
+  });
+  return check.result(() => ({
     name: trimmed,
     cells: cells.map((value) => value ?? ''),
     overrides: new Map<string, readonly string[]>(),
-  });
+  }));
 }
 
 export function clockAt(grid: Grid, day: number, hour: number): string | undefined {
@@ -157,26 +156,26 @@ export function clockUsage(grid: Grid): Map<string, WeekCell[]> {
 }
 
 export function auditGrid(grid: Grid, clocks: readonly Clock[]): Problem[] {
-  const problems: Problem[] = [];
+  const check = new Check();
   const used = new Set(grid.cells);
   for (const clock of clocks) {
     if (!used.has(clock.name)) {
-      problems.push(
-        warning(GRD(56), grid.name, 'defines a clock the grid never runs', { clock: clock.name }),
-      );
+      check.warn(GRD(56), grid.name, 'defines a clock the grid never runs', { clock: clock.name });
     }
   }
   for (const [day, hours] of grid.overrides) {
-    if (hours.length !== 24) {
-      problems.push(
-        error(GRD(57), grid.name, `has an override that is not a whole day`, {
-          day,
-          hours: hours.length,
-        }),
-      );
-    }
+    check.ensure(
+      hours.length === 24,
+      GRD(57),
+      grid.name,
+      'has an override that is not a whole day',
+      {
+        day,
+        hours: hours.length,
+      },
+    );
   }
-  return problems;
+  return [...check.problems];
 }
 
 export function describeCell(cell: WeekCell): string {

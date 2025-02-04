@@ -13,10 +13,10 @@ import type { CartNumber, CategoryCode } from '../util/ids.js';
 import { parseCategoryCode } from '../util/ids.js';
 import { parseDuration } from '../util/duration.js';
 import type { Tenths } from '../util/duration.js';
-import { codeFor, error, warning } from '../util/problem.js';
+import { codeFor, warning } from '../util/problem.js';
 import type { Problem } from '../util/problem.js';
-import { err, ok } from '../util/result.js';
 import type { Result } from '../util/result.js';
+import { Check, take } from '../util/check.js';
 import { formatCredits, parseCredits } from './artist.js';
 import type { Credit } from './artist.js';
 import { DEFAULT_TIMING, auditTiming, parseEndType } from './segue.js';
@@ -51,64 +51,74 @@ export const MIN_MUSIC_RUNTIME = 300;
 export const MAX_MUSIC_RUNTIME = 9000;
 
 export function makeCart(input: CartInput): Result<Cart, Problem[]> {
-  const problems: Problem[] = [];
-  const number = parseCartNumber(input.number);
-  if (!number.ok) {
-    problems.push(error(CART(20), input.number, number.error.reason));
-  }
+  const check = new Check();
+  const number = check.require(
+    parseCartNumber(input.number),
+    CART(20),
+    input.number,
+    (problem) => problem.reason,
+  );
   const title = input.title.trim();
-  if (title.length === 0) {
-    problems.push(error(CART(21), input.number, 'has no title'));
-  }
-  const runtime = parseDuration(input.runtime);
-  if (!runtime.ok) {
-    problems.push(error(CART(22), input.number, `runtime ${runtime.error.reason}`));
-  }
-  const music = number.ok ? isMusicCart(number.value) : false;
+  check.ensure(title.length > 0, CART(21), input.number, 'has no title');
+  const runtime = check.require(
+    parseDuration(input.runtime),
+    CART(22),
+    input.number,
+    (problem) => `runtime ${problem.reason}`,
+  );
+  const music = number === undefined ? false : isMusicCart(number);
   const billed = (input.billed ?? '').trim();
-  if (music && billed.length === 0) {
-    problems.push(error(CART(23), input.number, 'is a music cart with no artist'));
-  }
-  const intro = input.intro === undefined ? ok(DEFAULT_TIMING.intro) : parseDuration(input.intro);
-  if (!intro.ok) {
-    problems.push(error(CART(29), input.number, `intro ${intro.error.reason}`));
-  }
-  const tail = input.tail === undefined ? ok(DEFAULT_TIMING.tail) : parseDuration(input.tail);
-  if (!tail.ok) {
-    problems.push(error(CART(30), input.number, `tail ${tail.error.reason}`));
-  }
+  check.ensure(
+    !music || billed.length > 0,
+    CART(23),
+    input.number,
+    'is a music cart with no artist',
+  );
+  const category = check.require(
+    parseCategoryCode(input.category ?? (music ? 'A' : 'X')),
+    CART(24),
+    input.number,
+    (problem) => problem.reason,
+  );
+  const intro =
+    input.intro === undefined
+      ? DEFAULT_TIMING.intro
+      : check.require(
+          parseDuration(input.intro),
+          CART(29),
+          input.number,
+          (problem) => `intro ${problem.reason}`,
+        );
+  const tail =
+    input.tail === undefined
+      ? DEFAULT_TIMING.tail
+      : check.require(
+          parseDuration(input.tail),
+          CART(30),
+          input.number,
+          (problem) => `tail ${problem.reason}`,
+        );
   const endType = input.endType === undefined ? 'cold' : parseEndType(input.endType);
-  if (endType === undefined) {
-    problems.push(
-      error(CART(31), input.number, 'has an end type that is not cold, fade or sustain'),
-    );
-  }
-  const categoryText = input.category ?? (music ? 'A' : 'X');
-  const category = parseCategoryCode(categoryText);
-  if (!category.ok) {
-    problems.push(error(CART(24), input.number, category.error.reason));
-  }
-  if (
-    !number.ok ||
-    !runtime.ok ||
-    !category.ok ||
-    !intro.ok ||
-    !tail.ok ||
-    endType === undefined ||
-    problems.length > 0
-  ) {
-    return err(problems);
-  }
-  return ok({
-    number: number.value,
+  check.ensure(
+    endType !== undefined,
+    CART(31),
+    input.number,
+    'has an end type that is not cold, fade or sustain',
+  );
+  return check.result(() => ({
+    number: take(number, 'number'),
     title,
     billed,
     credits: parseCredits(billed),
-    runtime: runtime.value,
-    category: category.value,
+    runtime: take(runtime, 'runtime'),
+    category: take(category, 'category'),
     music,
-    timing: { intro: intro.value, endType, tail: tail.value },
-  });
+    timing: {
+      intro: take(intro, 'intro'),
+      endType: take(endType, 'endType'),
+      tail: take(tail, 'tail'),
+    },
+  }));
 }
 
 /**

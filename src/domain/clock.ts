@@ -16,10 +16,10 @@ import type { CartNumber, CategoryCode } from '../util/ids.js';
 import { parseCartNumber } from '../util/ids.js';
 import { fromMinutes, parseDuration } from '../util/duration.js';
 import type { Tenths } from '../util/duration.js';
-import { codeFor, error } from '../util/problem.js';
+import { codeFor } from '../util/problem.js';
 import type { Problem } from '../util/problem.js';
-import { err, ok } from '../util/result.js';
 import type { Result } from '../util/result.js';
+import { Check } from '../util/check.js';
 
 export type ElementKind = 'music' | 'fixed' | 'stopset' | 'news';
 
@@ -86,84 +86,88 @@ export const HOUR_TENTHS = fromMinutes(60);
 function buildElement(
   input: ElementInput,
   position: number,
-  problems: Problem[],
+  check: Check,
 ): ClockElement | undefined {
   const where = `element ${position}`;
-  const target = parseDuration(input.target);
-  if (!target.ok) {
-    problems.push(error(CLK(30), where, `target ${target.error.reason}`));
+  const target = check.require(
+    parseDuration(input.target),
+    CLK(30),
+    where,
+    (problem) => `target ${problem.reason}`,
+  );
+  if (target === undefined) {
     return undefined;
   }
-  if (target.value >= HOUR_TENTHS) {
-    problems.push(error(CLK(31), where, 'has a target past the end of the hour'));
+  if (
+    !check.ensure(target < HOUR_TENTHS, CLK(31), where, 'has a target past the end of the hour')
+  ) {
     return undefined;
   }
   switch (input.kind) {
     case 'music': {
-      const category = parseCategoryCode(input.category ?? '');
-      if (!category.ok) {
-        problems.push(error(CLK(32), where, 'is a music element with no usable category'));
+      const category = check.require(
+        parseCategoryCode(input.category ?? ''),
+        CLK(32),
+        where,
+        () => 'is a music element with no usable category',
+      );
+      if (category === undefined) {
         return undefined;
       }
-      const base = {
+      return {
         kind: 'music',
         position,
-        category: category.value,
-        target: target.value,
-      } as const;
-      return {
-        ...base,
+        category,
+        target,
         ...(input.noOpen === undefined ? {} : { noOpen: input.noOpen }),
         ...(input.noClose === undefined ? {} : { noClose: input.noClose }),
       };
     }
     case 'fixed': {
-      const cart = parseCartNumber(input.cart ?? '');
-      if (!cart.ok) {
-        problems.push(error(CLK(33), where, 'is a fixed element with no usable cart number'));
-        return undefined;
-      }
-      return { kind: 'fixed', position, cart: cart.value, target: target.value };
+      const cart = check.require(
+        parseCartNumber(input.cart ?? ''),
+        CLK(33),
+        where,
+        () => 'is a fixed element with no usable cart number',
+      );
+      return cart === undefined ? undefined : { kind: 'fixed', position, cart, target };
     }
     case 'stopset': {
       const name = (input.name ?? '').trim();
-      if (name.length === 0) {
-        problems.push(error(CLK(34), where, 'is a stopset with no name'));
+      if (!check.ensure(name.length > 0, CLK(34), where, 'is a stopset with no name')) {
         return undefined;
       }
-      const budget = parseDuration(input.budget ?? '2:00');
-      if (!budget.ok) {
-        problems.push(error(CLK(35), where, `stopset budget ${budget.error.reason}`));
-        return undefined;
-      }
-      return { kind: 'stopset', position, name, target: target.value, budget: budget.value };
+      const budget = check.require(
+        parseDuration(input.budget ?? '2:00'),
+        CLK(35),
+        where,
+        (problem) => `stopset budget ${problem.reason}`,
+      );
+      return budget === undefined ? undefined : { kind: 'stopset', position, name, target, budget };
     }
     case 'news': {
-      const length = parseDuration(input.length ?? '3:00');
-      if (!length.ok) {
-        problems.push(error(CLK(36), where, `news length ${length.error.reason}`));
-        return undefined;
-      }
-      return { kind: 'news', position, target: target.value, length: length.value };
+      const length = check.require(
+        parseDuration(input.length ?? '3:00'),
+        CLK(36),
+        where,
+        (problem) => `news length ${problem.reason}`,
+      );
+      return length === undefined ? undefined : { kind: 'news', position, target, length };
     }
     default:
-      problems.push(error(CLK(37), where, 'has an element kind nothing understands'));
+      check.fail(CLK(37), where, 'has an element kind nothing understands');
       return undefined;
   }
 }
 
 export function makeClock(name: string, inputs: readonly ElementInput[]): Result<Clock, Problem[]> {
-  const problems: Problem[] = [];
+  const check = new Check();
   const trimmed = name.trim();
-  if (trimmed.length === 0) {
-    problems.push(error(CLK(38), name, 'has no name'));
-  }
-  if (inputs.length === 0) {
-    problems.push(error(CLK(39), trimmed, 'has no elements'));
-  }
+  check.ensure(trimmed.length > 0, CLK(38), name, 'has no name');
+  check.ensure(inputs.length > 0, CLK(39), trimmed, 'has no elements');
   const elements: ClockElement[] = [];
   for (const [position, input] of inputs.entries()) {
-    const element = buildElement(input, position, problems);
+    const element = buildElement(input, position, check);
     if (element !== undefined) {
       elements.push(element);
     }
@@ -171,24 +175,18 @@ export function makeClock(name: string, inputs: readonly ElementInput[]): Result
   for (let index = 1; index < elements.length; index += 1) {
     const previous = elements[index - 1];
     const current = elements[index];
-    if (previous !== undefined && current !== undefined && current.target < previous.target) {
-      problems.push(
-        error(
-          CLK(40),
-          `${trimmed} element ${index}`,
-          'has a target earlier than the one before it',
-          {
-            target: current.target,
-            previous: previous.target,
-          },
-        ),
-      );
+    if (previous === undefined || current === undefined) {
+      continue;
     }
+    check.ensure(
+      current.target >= previous.target,
+      CLK(40),
+      `${trimmed} element ${index}`,
+      'has a target earlier than the one before it',
+      { target: current.target, previous: previous.target },
+    );
   }
-  if (problems.length > 0) {
-    return err(problems);
-  }
-  return ok({ name: trimmed, elements });
+  return check.result(() => ({ name: trimmed, elements }));
 }
 
 export function musicElements(clock: Clock): MusicElement[] {

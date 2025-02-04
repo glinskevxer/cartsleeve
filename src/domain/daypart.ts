@@ -12,10 +12,10 @@
  * hours as the same daypart on a station whose day starts at midnight.
  */
 
-import { codeFor, error } from '../util/problem.js';
+import { codeFor } from '../util/problem.js';
 import type { Problem } from '../util/problem.js';
-import { err, ok } from '../util/result.js';
 import type { Result } from '../util/result.js';
+import { Check } from '../util/check.js';
 
 export const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 export type DayName = (typeof DAY_NAMES)[number];
@@ -66,32 +66,34 @@ export function makeDaypart(
   name: string,
   spans: readonly DaypartSpan[],
 ): Result<Daypart, Problem[]> {
-  const problems: Problem[] = [];
+  const check = new Check();
   const trimmed = name.trim();
-  if (trimmed.length === 0) {
-    problems.push(error(DAYPART(1), name, 'has no name'));
-  }
-  if (spans.length === 0) {
-    problems.push(error(DAYPART(2), trimmed, 'covers no hours'));
-  }
+  check.ensure(trimmed.length > 0, DAYPART(1), name, 'has no name');
+  check.ensure(spans.length > 0, DAYPART(2), trimmed, 'covers no hours');
   const cells = new Set<WeekCell>();
   for (const span of spans) {
-    if (span.fromHour < 0 || span.toHour > 24 || span.fromHour >= span.toHour) {
-      problems.push(
-        error(DAYPART(3), trimmed, 'has an hour band that is empty or runs past the day', {
-          from: span.fromHour,
-          to: span.toHour,
-        }),
-      );
+    const bandOk = check.ensure(
+      span.fromHour >= 0 && span.toHour <= 24 && span.fromHour < span.toHour,
+      DAYPART(3),
+      trimmed,
+      'has an hour band that is empty or runs past the day',
+      { from: span.fromHour, to: span.toHour },
+    );
+    if (!bandOk) {
       continue;
     }
-    if (span.days.length === 0) {
-      problems.push(error(DAYPART(4), trimmed, 'has an hour band on no days'));
+    if (!check.ensure(span.days.length > 0, DAYPART(4), trimmed, 'has an hour band on no days')) {
       continue;
     }
     for (const day of span.days) {
-      if (!Number.isInteger(day) || day < 0 || day > 6) {
-        problems.push(error(DAYPART(5), trimmed, 'names a day outside the week', { day }));
+      const dayOk = check.ensure(
+        Number.isInteger(day) && day >= 0 && day <= 6,
+        DAYPART(5),
+        trimmed,
+        'names a day outside the week',
+        { day },
+      );
+      if (!dayOk) {
         continue;
       }
       for (let hour = span.fromHour; hour < span.toHour; hour += 1) {
@@ -99,10 +101,7 @@ export function makeDaypart(
       }
     }
   }
-  if (problems.length > 0) {
-    return err(problems);
-  }
-  return ok({ name: trimmed, cells });
+  return check.result(() => ({ name: trimmed, cells }));
 }
 
 export function coversCell(daypart: Daypart, cell: WeekCell): boolean {

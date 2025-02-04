@@ -13,9 +13,10 @@ import { fromMinutes } from '../util/duration.js';
 import type { Tenths } from '../util/duration.js';
 import { collect, err, ok } from '../util/result.js';
 import type { Result } from '../util/result.js';
+import { Check, take } from '../util/check.js';
 import { MOUNTAIN } from '../util/time.js';
 import type { ZoneRule } from '../util/time.js';
-import { codeFor, error } from '../util/problem.js';
+import { codeFor } from '../util/problem.js';
 import type { Problem } from '../util/problem.js';
 
 /**
@@ -59,36 +60,33 @@ export interface StationInput {
 const STATION = (n: number): string => codeFor('library', n);
 
 export function makeStation(input: StationInput): Result<Station, Problem[]> {
-  const problems: Problem[] = [];
-  const sign = parseCallSign(input.callSign);
-  if (!sign.ok) {
-    problems.push(error(STATION(1), input.callSign, sign.error.reason));
-  }
+  const check = new Check();
+  const sign = check.require(
+    parseCallSign(input.callSign),
+    STATION(1),
+    input.callSign,
+    (problem) => problem.reason,
+  );
   const name = input.name.trim();
-  if (name.length === 0) {
-    problems.push(error(STATION(2), input.callSign, 'has no name'));
-  }
+  check.ensure(name.length > 0, STATION(2), input.callSign, 'has no name');
   const dayStartHour = input.dayStartHour ?? 0;
-  if (!Number.isInteger(dayStartHour) || dayStartHour < 0 || dayStartHour > 23) {
-    problems.push(
-      error(STATION(3), input.callSign, 'has a day start hour outside 0 to 23', {
-        given: dayStartHour,
-      }),
-    );
-  }
+  check.ensure(
+    Number.isInteger(dayStartHour) && dayStartHour >= 0 && dayStartHour <= 23,
+    STATION(3),
+    input.callSign,
+    'has a day start hour outside 0 to 23',
+    { given: dayStartHour },
+  );
   const spotMinutes = input.spotMinutes ?? 12;
-  if (spotMinutes < 0 || spotMinutes > 60) {
-    problems.push(
-      error(STATION(4), input.callSign, 'has a spot ceiling outside an hour', {
-        given: spotMinutes,
-      }),
-    );
-  }
-  if (problems.length > 0 || !sign.ok) {
-    return err(problems);
-  }
-  return ok({
-    callSign: sign.value,
+  check.ensure(
+    spotMinutes >= 0 && spotMinutes <= 60,
+    STATION(4),
+    input.callSign,
+    'has a spot ceiling outside an hour',
+    { given: spotMinutes },
+  );
+  return check.result(() => ({
+    callSign: take(sign, 'callSign'),
     name,
     format: input.format.trim(),
     zone: input.zone ?? MOUNTAIN,
@@ -96,7 +94,7 @@ export function makeStation(input: StationInput): Result<Station, Problem[]> {
     spotCeiling: fromMinutes(spotMinutes),
     creditPolicy: input.creditPolicy ?? 'billed',
     reportingMode: input.reportingMode ?? 'census',
-  });
+  }));
 }
 
 /** Build a whole group, keeping every problem across every station. */
