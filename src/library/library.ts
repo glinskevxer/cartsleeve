@@ -17,11 +17,14 @@ import type { Cart } from '../domain/cart.js';
 import { separationKeys } from '../domain/artist.js';
 import type { CreditPolicy } from '../domain/station.js';
 import type { Recording } from '../domain/recording.js';
+import type { Attributes } from './attributes.js';
 
 export interface LibraryEntry {
   readonly cart: Cart;
   /** Absent on carts that are not music, and on music nobody has coded yet. */
   readonly recording?: Recording;
+  /** Absent until somebody codes the cart by ear. */
+  readonly attributes?: Attributes;
 }
 
 export interface Library {
