@@ -17,10 +17,8 @@ import { codeFor } from '../util/problem.js';
 import type { Problem } from '../util/problem.js';
 import { err, ok } from '../util/result.js';
 import type { Result } from '../util/result.js';
-import { makeCart } from '../domain/cart.js';
-import { makeRecording } from '../domain/recording.js';
-import { makeLibrary } from './library.js';
-import type { Library, LibraryEntry } from './library.js';
+import { importRows } from './import-core.js';
+import type { ImportCoreOutcome, SourceRow } from './import-core.js';
 
 const FIX = (n: number): string => codeFor('library', n);
 
@@ -63,14 +61,7 @@ export function readFixedLine(
   return values;
 }
 
-/**
- * The legacy runtime is mmm:ss with no leading zero and a leading space, and
- * the legacy end type is a single letter. Both go through the same parsers as
- * the delimited path once they are trimmed.
- */
-export interface FixedImportOutcome {
-  readonly library: Library;
-  readonly problems: readonly Problem[];
+export interface FixedImportOutcome extends ImportCoreOutcome {
   readonly linesRead: number;
   readonly linesKept: number;
 }
@@ -102,58 +93,19 @@ export function importFixed(
       })),
     );
   }
-  const problems: Problem[] = [];
-  const entries: LibraryEntry[] = [];
-  const lines = text.split('\n');
-  let read = 0;
-  for (const [offset, raw] of lines.entries()) {
+  const rows: SourceRow[] = [];
+  for (const [offset, raw] of text.split('\n').entries()) {
     const line = raw.replace(/\r$/, '');
-    if (line.trim().length === 0) {
+    if (line.trim().length === 0 || comments.some((prefix) => line.startsWith(prefix))) {
       continue;
     }
-    if (comments.some((prefix) => line.startsWith(prefix))) {
-      continue;
-    }
-    read += 1;
-    const at = (name: string): string => readFixedLine(line, layout).get(name) ?? '';
-    const where = `line ${offset + 1}`;
-    const built = makeCart({
-      number: at('cart'),
-      title: at('title'),
-      billed: at('artist'),
-      runtime: at('runtime'),
-      ...(at('category').length > 0 ? { category: at('category') } : {}),
-      ...(at('intro').length > 0 ? { intro: at('intro') } : {}),
-      ...(at('endtype').length > 0 ? { endType: at('endtype') } : {}),
+    const values = readFixedLine(line, layout);
+    rows.push({
+      where: `line ${offset + 1}`,
+      has: (field) => names.has(field),
+      read: (field) => values.get(field) ?? '',
     });
-    if (!built.ok) {
-      problems.push(...built.error.map((problem) => ({ ...problem, subject: where })));
-      continue;
-    }
-    if (at('isrc').length === 0) {
-      entries.push({ cart: built.value });
-      continue;
-    }
-    const recording = makeRecording(
-      {
-        isrc: at('isrc'),
-        title: built.value.title,
-        label: at('label'),
-        releaseYear: Number.parseInt(at('year'), 10),
-      },
-      options.currentYear,
-    );
-    if (!recording.ok) {
-      problems.push(...recording.error.map((problem) => ({ ...problem, subject: where })));
-      entries.push({ cart: built.value });
-      continue;
-    }
-    entries.push({ cart: built.value, recording: recording.value });
   }
-  return ok({
-    library: makeLibrary(entries),
-    problems,
-    linesRead: read,
-    linesKept: entries.length,
-  });
+  const outcome = importRows(rows, { currentYear: options.currentYear });
+  return ok({ ...outcome, linesRead: outcome.rowsRead, linesKept: outcome.rowsKept });
 }

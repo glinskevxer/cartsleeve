@@ -18,14 +18,8 @@ import { codeFor } from '../util/problem.js';
 import type { Problem } from '../util/problem.js';
 import { err, ok } from '../util/result.js';
 import type { Result } from '../util/result.js';
-import { makeCart } from '../domain/cart.js';
-import type { Cart } from '../domain/cart.js';
-import { makeRecording } from '../domain/recording.js';
-import { makeAttributes } from './attributes.js';
-import type { Attributes } from './attributes.js';
-import type { LibraryEntry } from './library.js';
-import { makeLibrary } from './library.js';
-import type { Library } from './library.js';
+import { importRows } from './import-core.js';
+import type { ImportCoreOutcome, SourceRow } from './import-core.js';
 
 const IMP = (n: number): string => codeFor('library', n);
 
@@ -75,23 +69,11 @@ export function resolveColumns(header: readonly string[]): Map<string, string> {
   return resolved;
 }
 
-export interface ImportOutcome {
-  readonly library: Library;
-  readonly problems: readonly Problem[];
-  readonly rowsRead: number;
-  readonly rowsKept: number;
-}
+export type ImportOutcome = ImportCoreOutcome;
 
 export interface ImportOptions {
   readonly delimiter?: DelimitedOptions;
   readonly currentYear: number;
-}
-
-function splitSounds(value: string): string[] {
-  return value
-    .split(/[;,|]/)
-    .map((piece) => piece.trim())
-    .filter((piece) => piece.length > 0);
 }
 
 export function importDelimited(
@@ -110,90 +92,24 @@ export function importDelimited(
     ]);
   }
   const columns = resolveColumns(table.value.header);
-  const problems: Problem[] = [];
-  for (const field of ['cart', 'title', 'runtime']) {
-    if (!columns.has(field)) {
-      problems.push({
+  const missing = ['cart', 'title', 'runtime'].filter((field) => !columns.has(field));
+  if (missing.length > 0) {
+    return err(
+      missing.map((field) => ({
         code: IMP(91),
-        severity: 'error',
+        severity: 'error' as const,
         subject: 'header',
         message: `has no column for ${field}`,
-      });
-    }
+      })),
+    );
   }
-  if (problems.length > 0) {
-    return err(problems);
-  }
-  const entries: LibraryEntry[] = [];
-  for (const [offset, row] of table.value.rows.entries()) {
-    const line = offset + 2;
-    const at = (field: string): string => {
+  const rows: SourceRow[] = table.value.rows.map((row, offset) => ({
+    where: `line ${offset + 2}`,
+    has: (field) => columns.has(field),
+    read: (field) => {
       const column = columns.get(field);
       return column === undefined ? '' : (row.get(column) ?? '');
-    };
-    const built = makeCart({
-      number: at('cart'),
-      title: at('title'),
-      billed: at('artist'),
-      runtime: at('runtime'),
-      ...(columns.has('category') ? { category: at('category') } : {}),
-      ...(columns.has('intro') && at('intro').length > 0 ? { intro: at('intro') } : {}),
-      ...(columns.has('endtype') && at('endtype').length > 0 ? { endType: at('endtype') } : {}),
-      ...(columns.has('tail') && at('tail').length > 0 ? { tail: at('tail') } : {}),
-    });
-    if (!built.ok) {
-      problems.push(...built.error.map((problem) => ({ ...problem, subject: `line ${line}` })));
-      continue;
-    }
-    const entry = buildEntry(built.value, at, columns, options.currentYear, line, problems);
-    entries.push(entry);
-  }
-  return ok({
-    library: makeLibrary(entries),
-    problems,
-    rowsRead: table.value.rows.length,
-    rowsKept: entries.length,
-  });
-}
-
-function buildEntry(
-  cart: Cart,
-  at: (field: string) => string,
-  columns: ReadonlyMap<string, string>,
-  currentYear: number,
-  line: number,
-  problems: Problem[],
-): LibraryEntry {
-  let attributes: Attributes | undefined;
-  const coded = makeAttributes(`line ${line}`, {
-    ...(columns.has('tempo') && at('tempo').length > 0 ? { tempo: at('tempo') } : {}),
-    ...(columns.has('mood') && at('mood').length > 0 ? { mood: at('mood') } : {}),
-    ...(columns.has('texture') && at('texture').length > 0 ? { texture: at('texture') } : {}),
-    ...(columns.has('sounds') ? { sounds: splitSounds(at('sounds')) } : {}),
-  });
-  if (coded.ok) {
-    attributes = coded.value;
-  } else {
-    problems.push(...coded.error);
-  }
-  // Whatever happens to the recording, the coded attributes belong on the entry.
-  const coding = attributes === undefined ? {} : { attributes };
-  if (!columns.has('isrc') || at('isrc').length === 0) {
-    return { cart, ...coding };
-  }
-  const recording = makeRecording(
-    {
-      isrc: at('isrc'),
-      title: cart.title,
-      label: columns.has('label') ? at('label') : '',
-      ...(columns.has('payee') && at('payee').length > 0 ? { payee: at('payee') } : {}),
-      releaseYear: columns.has('year') ? Number.parseInt(at('year'), 10) : Number.NaN,
     },
-    currentYear,
-  );
-  if (!recording.ok) {
-    problems.push(...recording.error.map((problem) => ({ ...problem, subject: `line ${line}` })));
-    return { cart, ...coding };
-  }
-  return { cart, recording: recording.value, ...coding };
+  }));
+  return ok(importRows(rows, { currentYear: options.currentYear }));
 }
