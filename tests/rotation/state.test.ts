@@ -89,6 +89,16 @@ describe('refresh', () => {
   const seeded = (): ReturnType<typeof withCategoryState> =>
     withCategoryState(EMPTY_ROTATION_STATE, A, freshState(A, carts(10), 2));
 
+  /** Seed a category and move its cursor on by one draw. */
+  function started(): ReturnType<typeof withCategoryState> {
+    const state = seeded();
+    const before = stateFor(state, A);
+    if (before === undefined) {
+      throw new Error('seeded state has no category A');
+    }
+    return withCursor(state, A, advance(before.packets, before.cursor));
+  }
+
   it('deals fresh when the category has no state yet', () => {
     const next = refresh(EMPTY_ROTATION_STATE, A, carts(6), 3, { policy: 'keep' });
     expect(next.laps).toBe(0);
@@ -96,38 +106,20 @@ describe('refresh', () => {
   });
 
   it('keeps the cursor under the keep policy even when the library moved', () => {
-    const state = seeded();
-    const before = stateFor(state, A);
-    const moved = withCursor(
-      state,
-      A,
-      advance(before?.packets ?? dealPackets(A, [], 1), before?.cursor ?? startCursor(A)),
-    );
+    const moved = started();
     const next = refresh(moved, A, [...carts(9), cart('M9999')], 2, { policy: 'keep' });
     expect(next.cursor).toEqual(stateFor(moved, A)?.cursor);
   });
 
   it('deals again under the redeal policy and keeps the lap count', () => {
-    const state = seeded();
-    const before = stateFor(state, A);
-    const moved = withCursor(
-      state,
-      A,
-      advance(before?.packets ?? dealPackets(A, [], 1), before?.cursor ?? startCursor(A)),
-    );
+    const moved = started();
     const next = refresh(moved, A, carts(10), 2, { policy: 'redeal' });
     expect(progress(next)).toBe(0);
     expect(next.laps).toBe(0);
   });
 
   it('keeps a small change under auto and redeals a large one', () => {
-    const state = seeded();
-    const before = stateFor(state, A);
-    const moved = withCursor(
-      state,
-      A,
-      advance(before?.packets ?? dealPackets(A, [], 1), before?.cursor ?? startCursor(A)),
-    );
+    const moved = started();
     const small = refresh(moved, A, [...carts(9), cart('M9999')], 2, { policy: 'auto' });
     const large = refresh(moved, A, carts(10, 100), 2, { policy: 'auto' });
     expect(progress(small)).toBeGreaterThan(0);
@@ -135,13 +127,7 @@ describe('refresh', () => {
   });
 
   it('honours a threshold that is set explicitly', () => {
-    const state = seeded();
-    const before = stateFor(state, A);
-    const moved = withCursor(
-      state,
-      A,
-      advance(before?.packets ?? dealPackets(A, [], 1), before?.cursor ?? startCursor(A)),
-    );
+    const moved = started();
     const nudged = [...carts(9), cart('M9999')];
     expect(
       progress(refresh(moved, A, nudged, 2, { policy: 'auto', threshold: 0.5 })),
