@@ -10,72 +10,49 @@
  * The fix is not to force a spread, which fights the rest ordering and produces
  * a worse log. It is to measure the spread, report the carts that are stuck, and
  * let the tie break in the candidate search prefer a cart that has not been
- * heard in this daypart lately. Measuring is this module's job.
+ * heard in this daypart lately.
  */
 
-import { spread } from '../util/ordering.js';
 import type { Daypart, WeekCell } from '../domain/daypart.js';
 import { coversCell } from '../domain/daypart.js';
 import type { CartNumber } from '../util/ids.js';
+import { concentration, measureBalance, meanImbalance, overThreshold } from './balance.js';
+import type { Balance } from './balance.js';
 import type { Play } from './rest.js';
 
-export interface DaypartSpread {
-  readonly cart: CartNumber;
-  /** Plays per daypart, in the order the dayparts were given. */
-  readonly counts: readonly number[];
-  readonly plays: number;
-  /** 0 for perfectly even, 1 for every play in one daypart. */
-  readonly imbalance: number;
-  /** Dayparts the cart has never been heard in. */
-  readonly unheard: readonly string[];
+export interface DaypartBalance extends Balance {
+  /** Names of the dayparts the cart has never been heard in. */
+  readonly unheardNames: readonly string[];
 }
 
-function daypartOf(dayparts: readonly Daypart[], cell: WeekCell): number {
-  return dayparts.findIndex((daypart) => coversCell(daypart, cell));
+function bucketFor(dayparts: readonly Daypart[]): (cell: WeekCell) => number {
+  return (cell) => dayparts.findIndex((daypart) => coversCell(daypart, cell));
 }
 
-/**
- * Count a cart's plays into the dayparts they landed in. A play in a cell no
- * daypart claims is not counted anywhere, which is deliberate: an unclaimed
- * hour is not an audience anyone is buying or measuring.
- */
 export function daypartCounts(
   plays: readonly Play[],
   dayparts: readonly Daypart[],
   cart: CartNumber,
 ): number[] {
-  const counts = Array.from({ length: dayparts.length }, () => 0);
-  for (const play of plays) {
-    if (play.cart !== cart) {
-      continue;
-    }
-    const index = daypartOf(dayparts, play.cell);
-    if (index >= 0) {
-      counts[index] = (counts[index] ?? 0) + 1;
-    }
-  }
-  return counts;
+  return [
+    ...measureBalance(plays, cart, { buckets: dayparts.length, bucketOf: bucketFor(dayparts) })
+      .counts,
+  ];
 }
 
 export function daypartSpread(
   plays: readonly Play[],
   dayparts: readonly Daypart[],
   cart: CartNumber,
-): DaypartSpread {
-  const counts = daypartCounts(plays, dayparts, cart);
-  const total = counts.reduce((sum, count) => sum + count, 0);
-  const unheard: string[] = [];
-  for (const [index, daypart] of dayparts.entries()) {
-    if ((counts[index] ?? 0) === 0) {
-      unheard.push(daypart.name);
-    }
-  }
+): DaypartBalance {
+  const balance = measureBalance(plays, cart, {
+    buckets: dayparts.length,
+    bucketOf: bucketFor(dayparts),
+    reachable: dayparts.map((_, index) => index),
+  });
   return {
-    cart,
-    counts,
-    plays: total,
-    imbalance: spread(counts),
-    unheard,
+    ...balance,
+    unheardNames: balance.unheard.map((index) => dayparts[index]?.name ?? ''),
   };
 }
 
@@ -83,21 +60,19 @@ export function spreadsFor(
   plays: readonly Play[],
   dayparts: readonly Daypart[],
   carts: readonly CartNumber[],
-): DaypartSpread[] {
+): DaypartBalance[] {
   return carts.map((cart) => daypartSpread(plays, dayparts, cart));
 }
 
-/**
- * Carts stuck in one part of the week. A cart with too few plays to have
- * spread anywhere is not stuck, it is just new, so a floor keeps those out of
- * the report rather than filling it with noise.
- */
+/** Carts stuck in one part of the week. */
 export function stuck(
-  spreads: readonly DaypartSpread[],
+  spreads: readonly DaypartBalance[],
   threshold: number,
   minimumPlays = 3,
-): DaypartSpread[] {
-  return spreads.filter((each) => each.plays >= minimumPlays && each.imbalance >= threshold);
+): DaypartBalance[] {
+  return overThreshold(spreads, (balance) => balance.imbalance, threshold, minimumPlays).filter(
+    (balance): balance is DaypartBalance => 'unheardNames' in balance,
+  );
 }
 
 /**
@@ -129,11 +104,8 @@ export function staleness(
   return Number.POSITIVE_INFINITY;
 }
 
-/** The whole category's imbalance, as one number for an hour summary. */
-export function categoryImbalance(spreads: readonly DaypartSpread[]): number {
-  const measured = spreads.filter((each) => each.plays > 0);
-  if (measured.length === 0) {
-    return 0;
-  }
-  return measured.reduce((sum, each) => sum + each.imbalance, 0) / measured.length;
+export function categoryImbalance(spreads: readonly DaypartBalance[]): number {
+  return meanImbalance(spreads);
 }
+
+export { concentration };

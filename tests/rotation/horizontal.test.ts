@@ -61,21 +61,21 @@ describe('daypartSpread', () => {
     const measured = daypartSpread(PLAYS, DAYPARTS, cart('M0001'));
     expect(measured.plays).toBe(4);
     expect(measured.imbalance).toBeCloseTo(1);
-    expect(measured.unheard).toEqual(['MID', 'PMD']);
+    expect(measured.unheardNames).toEqual(['MID', 'PMD']);
   });
 
   it('calls an evenly spread cart balanced', () => {
     const measured = daypartSpread(PLAYS, DAYPARTS, cart('M0002'));
     expect(measured.plays).toBe(3);
     expect(measured.imbalance).toBe(0);
-    expect(measured.unheard).toEqual([]);
+    expect(measured.unheardNames).toEqual([]);
   });
 
   it('reports a cart that never played as unheard everywhere', () => {
     const measured = daypartSpread(PLAYS, DAYPARTS, cart('M9999'));
     expect(measured.plays).toBe(0);
     expect(measured.imbalance).toBe(0);
-    expect(measured.unheard).toEqual(['AMD', 'MID', 'PMD']);
+    expect(measured.unheardNames).toEqual(['AMD', 'MID', 'PMD']);
   });
 
   it('measures a partial imbalance between the two ends', () => {

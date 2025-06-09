@@ -61,7 +61,7 @@ describe('hourCounts', () => {
 describe('hourSpread', () => {
   it('finds the hour a cart lands in most', () => {
     const measured = hourSpread(PLAYS, cart('M0001'));
-    expect(measured.heaviestHour).toBe(8);
+    expect(measured.heaviest).toBe(8);
     expect(measured.heaviestCount).toBe(4);
     expect(measured.plays).toBe(4);
   });
