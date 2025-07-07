@@ -4,6 +4,7 @@ import { makeRecording } from '../../src/domain/recording.js';
 import type { Recording } from '../../src/domain/recording.js';
 import { makeStation } from '../../src/domain/station.js';
 import type { Station, StationInput } from '../../src/domain/station.js';
+import { makeAttributes } from '../../src/library/attributes.js';
 import { makeLibrary } from '../../src/library/library.js';
 import type { Library, LibraryEntry } from '../../src/library/library.js';
 import { expectOk } from './result.js';
@@ -56,13 +57,43 @@ export interface EntrySpec extends Partial<CartInput> {
   readonly label?: string;
   readonly recordingTitle?: string;
   readonly noRecording?: boolean;
+  /** Coded attributes. Any of these present gives the entry an attribute block. */
+  readonly tempo?: string;
+  readonly mood?: string;
+  readonly texture?: string;
+  readonly sounds?: readonly string[];
 }
 
 export function entry(spec: EntrySpec = {}): LibraryEntry {
-  const { isrc, releaseYear, label, recordingTitle, noRecording = false, ...cartInput } = spec;
+  const {
+    isrc,
+    releaseYear,
+    label,
+    recordingTitle,
+    noRecording = false,
+    tempo,
+    mood,
+    texture,
+    sounds,
+    ...cartInput
+  } = spec;
   const built = cart(cartInput);
+  const anyCoded =
+    tempo !== undefined || mood !== undefined || texture !== undefined || sounds !== undefined;
+  const coded = anyCoded
+    ? {
+        attributes: expectOk(
+          makeAttributes(built.number, {
+            ...(tempo === undefined ? {} : { tempo }),
+            ...(mood === undefined ? {} : { mood }),
+            ...(texture === undefined ? {} : { texture }),
+            ...(sounds === undefined ? {} : { sounds }),
+          }),
+        ),
+      }
+    : {};
   if (noRecording) {
-    return { cart: built };
+    return { cart: built, ...coded };
   }
   return {
     cart: built,
@@ -72,6 +103,7 @@ export function entry(spec: EntrySpec = {}): LibraryEntry {
       ...(label === undefined ? {} : { label }),
       title: recordingTitle ?? built.title,
     }),
+    ...coded,
   };
 }
 
