@@ -101,7 +101,7 @@ describe('soundSeparation', () => {
       candidate: { sounds: ['violin', 'lap steel'] },
       slot: { at: tenths(at(8)) },
     });
-    expect(nearestSoundCollision(context, MINIMUM)?.families).toEqual(['FIDDLE', 'STEEL']);
+    expect(nearestSoundCollision(context, MINIMUM)?.detail['families']).toBe('FIDDLE STEEL');
   });
 
   it('passes a candidate with no sounds coded', () => {

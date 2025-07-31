@@ -12,16 +12,15 @@
  * them can turn a legal pair into a breach, which is why the rule reads the
  * schedule under construction and not the running order.
  *
- * Which artists count is the station's credit policy, and that is the next
- * module's problem. This one takes whatever keys it is given.
+ * Which artists count is the station's credit policy.
  */
 
 import { separationKeys } from '../domain/artist.js';
 import { codeFor } from '../util/problem.js';
-import { TENTHS_PER_MINUTE } from '../util/duration.js';
 import type { Tenths } from '../util/duration.js';
-import { PASSED, rejected } from './rule.js';
-import type { Placed, Rule, RuleContext, RuleVerdict } from './rule.js';
+import { HEADROOM_WINDOW, headroom, makeDistanceRule, nearestCollision } from './distance.js';
+import type { Collision, DistanceSpec, Match } from './distance.js';
+import type { Placed, RuleContext } from './rule.js';
 
 export const ARTIST_TOO_CLOSE = codeFor('rule', 1);
 
@@ -39,91 +38,38 @@ export function candidateKeys(context: RuleContext): string[] {
   return separationKeys(context.candidate.cart.credits, context.station.creditPolicy);
 }
 
-export interface Collision {
-  readonly artist: string;
-  readonly cart: string;
-  /** Wall clock distance in tenths. */
-  readonly distance: number;
-}
+export const artistSpec: DistanceSpec = {
+  name: 'artist separation',
+  tier: 2,
+  code: ARTIST_TOO_CLOSE,
+  minimum: artistMinimum,
+  match(context: RuleContext, item: Placed): Match | undefined {
+    const wanted = new Set(candidateKeys(context));
+    if (wanted.size === 0) {
+      return undefined;
+    }
+    for (const key of keysOf(context, item)) {
+      if (wanted.has(key)) {
+        return { what: key, detail: { artist: key } };
+      }
+    }
+    return undefined;
+  },
+  message: (collision, minutes, needed) =>
+    `${collision.what} is ${minutes} minutes away and needs ${needed}`,
+};
 
-/**
- * The nearest placement sharing an artist with the candidate, inside a window.
- *
- * Nearest rather than first, because a candidate can collide on both sides of
- * the slot and the breach report should name the one that actually breaks the
- * minimum. Bounded by a window rather than walking the whole log, because the
- * search runs this once per candidate per slot and the log is a week long.
- */
+export const artistSeparation = makeDistanceRule(artistSpec);
+
 export function nearestArtistCollision(
   context: RuleContext,
   window: Tenths,
 ): Collision | undefined {
-  const wanted = new Set(candidateKeys(context));
-  if (wanted.size === 0) {
-    return undefined;
-  }
-  let nearest: Collision | undefined;
-  for (const item of context.schedule.within(context.slot.at, window)) {
-    if (item.position === context.slot.position) {
-      continue;
-    }
-    for (const key of keysOf(context, item)) {
-      if (!wanted.has(key)) {
-        continue;
-      }
-      const distance = Math.abs(item.at - context.slot.at);
-      if (nearest === undefined || distance < nearest.distance) {
-        nearest = { artist: key, cart: item.cart, distance };
-      }
-    }
-  }
-  return nearest;
+  return nearestCollision(context, window, artistSpec);
 }
-
-export const artistSeparation: Rule = {
-  name: 'artist separation',
-  tier: 2,
-  evaluate(context: RuleContext): RuleVerdict {
-    const minimum = artistMinimum(context);
-    if (minimum <= 0) {
-      return PASSED;
-    }
-    const collision = nearestArtistCollision(context, minimum);
-    if (collision === undefined || collision.distance >= minimum) {
-      return PASSED;
-    }
-    const short = minimum - collision.distance;
-    return rejected(
-      ARTIST_TOO_CLOSE,
-      `${collision.artist} is ${Math.round(collision.distance / TENTHS_PER_MINUTE)} minutes away and needs ${Math.round(minimum / TENTHS_PER_MINUTE)}`,
-      short,
-      {
-        artist: collision.artist,
-        against: collision.cart,
-        minutes: Math.round(collision.distance / TENTHS_PER_MINUTE),
-        needed: Math.round(minimum / TENTHS_PER_MINUTE),
-      },
-    );
-  },
-};
-
-/**
- * How much room the candidate has, as a multiple of the minimum. One or more
- * passes; below one is the shortfall. The candidate search uses this to prefer
- * the cart with the most room among several that all pass, so it looks further
- * than the minimum and caps rather than returning infinity for everything.
- */
-export const HEADROOM_WINDOW = 3;
 
 export function artistHeadroom(context: RuleContext): number {
-  const minimum = artistMinimum(context);
-  if (minimum <= 0) {
-    return Number.POSITIVE_INFINITY;
-  }
-  const window = (minimum * HEADROOM_WINDOW) as Tenths;
-  const collision = nearestArtistCollision(context, window);
-  if (collision === undefined) {
-    return HEADROOM_WINDOW;
-  }
-  return collision.distance / minimum;
+  return headroom(context, artistSpec);
 }
+
+export { HEADROOM_WINDOW };

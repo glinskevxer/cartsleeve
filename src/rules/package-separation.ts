@@ -20,8 +20,9 @@ import { TENTHS_PER_MINUTE } from '../util/duration.js';
 import type { Tenths } from '../util/duration.js';
 import { isrcParts } from '../util/ids.js';
 import type { Isrc } from '../util/ids.js';
-import { PASSED, rejected } from './rule.js';
-import type { Placed, Rule, RuleContext, RuleVerdict } from './rule.js';
+import { headroom, makeDistanceRule, nearestCollision } from './distance.js';
+import type { Collision, DistanceSpec, Match } from './distance.js';
+import type { Placed, RuleContext } from './rule.js';
 
 export const PACKAGE_TOO_CLOSE = codeFor('rule', 16);
 
@@ -57,69 +58,44 @@ export function samePackage(a: PackageKey, b: PackageKey): boolean {
   return Math.abs(a.designation - b.designation) <= PACKAGE_SPAN;
 }
 
-export interface PackageCollision {
-  readonly cart: string;
-  readonly distance: number;
-  readonly gap: number;
-}
+export const packageSpec: DistanceSpec = {
+  name: 'package separation',
+  tier: 4,
+  code: PACKAGE_TOO_CLOSE,
+  minimum: () => PACKAGE_MINIMUM as Tenths,
+  match(context: RuleContext, item: Placed): Match | undefined {
+    const ours = context.candidate.recording?.isrc;
+    const theirs = item.entry.recording?.isrc;
+    if (ours === undefined || theirs === undefined) {
+      return undefined;
+    }
+    // The same recording is the recording rule's business, not this one's.
+    if (theirs === ours) {
+      return undefined;
+    }
+    const mine = packageKeyOf(ours);
+    const other = packageKeyOf(theirs);
+    if (!samePackage(mine, other)) {
+      return undefined;
+    }
+    return {
+      what: 'the same release',
+      detail: { gap: Math.abs(mine.designation - other.designation) },
+    };
+  },
+  message: (collision, minutes) =>
+    `is off the same release as ${collision.cart}, ${minutes} minutes away`,
+};
 
-function keyOf(item: Placed): PackageKey | undefined {
-  const isrc = item.entry.recording?.isrc;
-  return isrc === undefined ? undefined : packageKeyOf(isrc);
-}
+export const packageSeparation = makeDistanceRule(packageSpec);
 
 export function nearestPackageCollision(
   context: RuleContext,
   window: Tenths,
-): PackageCollision | undefined {
-  const ours = context.candidate.recording?.isrc;
-  if (ours === undefined) {
-    return undefined;
-  }
-  const mine = packageKeyOf(ours);
-  let nearest: PackageCollision | undefined;
-  for (const item of context.schedule.within(context.slot.at, window)) {
-    if (item.position === context.slot.position) {
-      continue;
-    }
-    const theirs = keyOf(item);
-    if (theirs === undefined || !samePackage(mine, theirs)) {
-      continue;
-    }
-    // The same recording is the recording rule's business, not this one's.
-    if (item.entry.recording?.isrc === ours) {
-      continue;
-    }
-    const distance = Math.abs(item.at - context.slot.at);
-    if (nearest === undefined || distance < nearest.distance) {
-      nearest = {
-        cart: item.cart,
-        distance,
-        gap: Math.abs(mine.designation - theirs.designation),
-      };
-    }
-  }
-  return nearest;
+): Collision | undefined {
+  return nearestCollision(context, window, packageSpec);
 }
 
-export const packageSeparation: Rule = {
-  name: 'package separation',
-  tier: 4,
-  evaluate(context: RuleContext): RuleVerdict {
-    const collision = nearestPackageCollision(context, PACKAGE_MINIMUM as Tenths);
-    if (collision === undefined || collision.distance >= PACKAGE_MINIMUM) {
-      return PASSED;
-    }
-    return rejected(
-      PACKAGE_TOO_CLOSE,
-      `is off the same release as ${collision.cart}, ${Math.round(collision.distance / TENTHS_PER_MINUTE)} minutes away`,
-      PACKAGE_MINIMUM - collision.distance,
-      {
-        against: collision.cart,
-        gap: collision.gap,
-        minutes: Math.round(collision.distance / TENTHS_PER_MINUTE),
-        needed: Math.round(PACKAGE_MINIMUM / TENTHS_PER_MINUTE),
-      },
-    );
-  },
-};
+export function packageHeadroom(context: RuleContext): number {
+  return headroom(context, packageSpec);
+}

@@ -17,11 +17,11 @@
  */
 
 import { codeFor } from '../util/problem.js';
-import { TENTHS_PER_MINUTE } from '../util/duration.js';
 import type { Tenths } from '../util/duration.js';
 import { sharedFamilies } from '../library/sounds.js';
-import { PASSED, rejected } from './rule.js';
-import type { Placed, Rule, RuleContext, RuleVerdict } from './rule.js';
+import { headroom, makeDistanceRule, nearestCollision } from './distance.js';
+import type { Collision, DistanceSpec, Match } from './distance.js';
+import type { Placed, RuleContext } from './rule.js';
 
 export const SOUND_TOO_CLOSE = codeFor('rule', 5);
 
@@ -33,62 +33,35 @@ function soundsOf(item: Placed): readonly string[] {
   return item.entry.attributes?.sounds ?? [];
 }
 
-export interface SoundCollision {
-  readonly families: readonly string[];
-  readonly cart: string;
-  readonly distance: number;
-}
-
-export function nearestSoundCollision(
-  context: RuleContext,
-  window: Tenths,
-): SoundCollision | undefined {
-  const ours = context.candidate.attributes?.sounds ?? [];
-  if (ours.length === 0) {
-    return undefined;
-  }
-  let nearest: SoundCollision | undefined;
-  for (const item of context.schedule.within(context.slot.at, window)) {
-    if (item.position === context.slot.position) {
-      continue;
+export const soundSpec: DistanceSpec = {
+  name: 'sound separation',
+  tier: 3,
+  code: SOUND_TOO_CLOSE,
+  minimum: soundMinimum,
+  match(context: RuleContext, item: Placed): Match | undefined {
+    const ours = context.candidate.attributes?.sounds ?? [];
+    if (ours.length === 0) {
+      return undefined;
     }
     const shared = sharedFamilies(context.sounds, ours, soundsOf(item));
     if (shared.length === 0) {
-      continue;
+      return undefined;
     }
-    const distance = Math.abs(item.at - context.slot.at);
-    if (nearest === undefined || distance < nearest.distance) {
-      nearest = { families: shared, cart: item.cart, distance };
-    }
-  }
-  return nearest;
+    return { what: shared.join(' and '), detail: { families: shared.join(' ') } };
+  },
+  message: (collision, minutes, needed) =>
+    `${collision.what} played ${minutes} minutes ago and needs ${needed}`,
+};
+
+export const soundSeparation = makeDistanceRule(soundSpec);
+
+export function nearestSoundCollision(context: RuleContext, window: Tenths): Collision | undefined {
+  return nearestCollision(context, window, soundSpec);
 }
 
-export const soundSeparation: Rule = {
-  name: 'sound separation',
-  tier: 3,
-  evaluate(context: RuleContext): RuleVerdict {
-    const minimum = soundMinimum(context);
-    if (minimum <= 0) {
-      return PASSED;
-    }
-    const collision = nearestSoundCollision(context, minimum);
-    if (collision === undefined || collision.distance >= minimum) {
-      return PASSED;
-    }
-    return rejected(
-      SOUND_TOO_CLOSE,
-      `${collision.families.join(' and ')} played ${Math.round(collision.distance / TENTHS_PER_MINUTE)} minutes ago and needs ${Math.round(minimum / TENTHS_PER_MINUTE)}`,
-      minimum - collision.distance,
-      {
-        families: collision.families.join(' '),
-        against: collision.cart,
-        minutes: Math.round(collision.distance / TENTHS_PER_MINUTE),
-        needed: Math.round(minimum / TENTHS_PER_MINUTE),
-      },
-    );
-  },
-};
+export function soundHeadroom(context: RuleContext): number {
+  return headroom(context, soundSpec);
+}
 
 /**
  * How many carts in a row share a family with the candidate, walking back from

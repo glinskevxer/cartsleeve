@@ -13,11 +13,10 @@
  */
 
 import { codeFor } from '../util/problem.js';
-import { TENTHS_PER_MINUTE } from '../util/duration.js';
 import type { Tenths } from '../util/duration.js';
-import type { Isrc } from '../util/ids.js';
-import { PASSED, rejected } from './rule.js';
-import type { Placed, Rule, RuleContext, RuleVerdict } from './rule.js';
+import { headroom, makeDistanceRule, nearestCollision } from './distance.js';
+import type { Collision, DistanceSpec, Match } from './distance.js';
+import type { Placed, RuleContext } from './rule.js';
 
 export const RECORDING_TOO_CLOSE = codeFor('rule', 4);
 
@@ -25,67 +24,40 @@ export function recordingMinimum(context: RuleContext): Tenths {
   return context.categories.get(context.slot.category)?.separation.recording ?? (0 as Tenths);
 }
 
-export interface RecordingCollision {
-  readonly isrc: Isrc;
-  readonly cart: string;
-  readonly distance: number;
-  /** True when the two placements went out on different cart numbers. */
-  readonly doubleCarded: boolean;
-}
+export const recordingSpec: DistanceSpec = {
+  name: 'recording separation',
+  tier: 1,
+  code: RECORDING_TOO_CLOSE,
+  minimum: recordingMinimum,
+  match(context: RuleContext, item: Placed): Match | undefined {
+    const ours = context.candidate.recording?.isrc;
+    if (ours === undefined || item.entry.recording?.isrc !== ours) {
+      return undefined;
+    }
+    const doubleCarded = item.cart !== context.candidate.cart.number;
+    return {
+      what: ours,
+      detail: { isrc: ours, doubleCarded: doubleCarded ? 'yes' : 'no' },
+    };
+  },
+  message: (collision, minutes, needed) => {
+    const how = collision.detail['doubleCarded'] === 'yes' ? ' on another cart' : '';
+    return `the same master played ${minutes} minutes ago${how} and needs ${needed}`;
+  },
+};
+
+export const recordingSeparation = makeDistanceRule(recordingSpec);
 
 export function nearestRecordingCollision(
   context: RuleContext,
   window: Tenths,
-): RecordingCollision | undefined {
-  const ours = context.candidate.recording?.isrc;
-  if (ours === undefined) {
-    return undefined;
-  }
-  let nearest: RecordingCollision | undefined;
-  for (const item of context.schedule.within(context.slot.at, window)) {
-    if (item.position === context.slot.position || item.entry.recording?.isrc !== ours) {
-      continue;
-    }
-    const distance = Math.abs(item.at - context.slot.at);
-    if (nearest === undefined || distance < nearest.distance) {
-      nearest = {
-        isrc: ours,
-        cart: item.cart,
-        distance,
-        doubleCarded: item.cart !== context.candidate.cart.number,
-      };
-    }
-  }
-  return nearest;
+): Collision | undefined {
+  return nearestCollision(context, window, recordingSpec);
 }
 
-export const recordingSeparation: Rule = {
-  name: 'recording separation',
-  tier: 1,
-  evaluate(context: RuleContext): RuleVerdict {
-    const minimum = recordingMinimum(context);
-    if (minimum <= 0) {
-      return PASSED;
-    }
-    const collision = nearestRecordingCollision(context, minimum);
-    if (collision === undefined || collision.distance >= minimum) {
-      return PASSED;
-    }
-    const how = collision.doubleCarded ? ' on another cart' : '';
-    return rejected(
-      RECORDING_TOO_CLOSE,
-      `the same master played ${Math.round(collision.distance / TENTHS_PER_MINUTE)} minutes ago${how} and needs ${Math.round(minimum / TENTHS_PER_MINUTE)}`,
-      minimum - collision.distance,
-      {
-        isrc: collision.isrc,
-        against: collision.cart,
-        doubleCarded: collision.doubleCarded ? 'yes' : 'no',
-        minutes: Math.round(collision.distance / TENTHS_PER_MINUTE),
-        needed: Math.round(minimum / TENTHS_PER_MINUTE),
-      },
-    );
-  },
-};
+export function recordingHeadroom(context: RuleContext): number {
+  return headroom(context, recordingSpec);
+}
 
 /**
  * Every placement of this master in the window, whatever cart it went out on.
