@@ -40,7 +40,9 @@ export function recording(overrides: Partial<Parameters<typeof makeRecording>[0]
   return expectOk(
     makeRecording(
       {
-        isrc: `USTST${String(FIXTURE_YEAR).slice(2)}${String(sequence % 100_000).padStart(5, '0')}`,
+        // Designations are spaced well beyond the package span, so two fixture
+        // carts never look like two tracks off one release unless a test says so.
+        isrc: `USTST${String(FIXTURE_YEAR).slice(2)}${String((sequence * 1000) % 100_000).padStart(5, '0')}`,
         title: 'Untitled',
         label: 'Test Records',
         releaseYear: 2001,
