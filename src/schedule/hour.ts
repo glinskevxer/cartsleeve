@@ -53,7 +53,31 @@ export interface HourInput {
   ) => RuleContext;
   readonly scoring: Omit<ScoreInput, 'context'>;
   readonly floor?: number;
+  /**
+   * Everything scheduled before this hour started.
+   *
+   * The rules have to see across the hour boundary: a cart played at 07:55 is
+   * not free again at 08:00 just because a new hour began. The hour builds its
+   * reader over this plus whatever it has placed itself, so a caller that
+   * passes nothing gets an hour scheduled in isolation, which is only ever
+   * right for the first hour of a run.
+   */
+  readonly carried?: readonly Placed[];
+  /**
+   * What to add to each element position so the slot is identified uniquely
+   * across the whole run.
+   *
+   * A clock numbers its elements from zero, so hour two's slot zero and hour
+   * one's slot zero are the same number. The rules skip the slot they are
+   * filling by comparing positions, so without an offset a cart placed at
+   * position zero last hour is invisible to the slot at position zero this
+   * hour, and the separation rules silently stop working across the boundary.
+   */
+  readonly positionOffset?: number;
 }
+
+/** Positions reserved per hour. No clock comes close to this many elements. */
+export const POSITIONS_PER_HOUR = 1000;
 
 export interface FilledSlot {
   readonly element: ClockElement;
@@ -95,6 +119,7 @@ function lengthOf(element: ClockElement, library: Library): { length: Tenths; ti
 
 export function fillHour(input: HourInput): HourOutcome {
   const bounds = musicBounds(input.clock);
+  const offset = input.positionOffset ?? 0;
   const slots: FilledSlot[] = [];
   const placed: Placed[] = [];
   let cursor = input.startsAt;
@@ -119,7 +144,7 @@ export function fillHour(input: HourInput): HourOutcome {
     }
 
     const slot: Slot = {
-      position: element.position,
+      position: offset + element.position,
       at: cursor,
       category: element.category,
       cell: input.cell,
@@ -128,7 +153,7 @@ export function fillHour(input: HourInput): HourOutcome {
       closesHour: bounds.last === element.position,
     };
     const candidates = input.candidatesFor(slot);
-    const view = makeScheduleView(placed);
+    const view = makeScheduleView([...(input.carried ?? []), ...placed]);
     const outcome = fillSlot({
       slot,
       candidates,
@@ -158,7 +183,7 @@ export function fillHour(input: HourInput): HourOutcome {
     placed.push({
       cart: entry.cart.number,
       entry,
-      position: element.position,
+      position: offset + element.position,
       at,
       category: element.category,
       cell: input.cell,

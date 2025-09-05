@@ -1,4 +1,5 @@
 import type { HourInput } from '../../src/schedule/hour.js';
+import type { DayInput } from '../../src/schedule/day.js';
 import type { Clock } from '../../src/domain/clock.js';
 import { makeClock } from '../../src/domain/clock.js';
 import type { ElementInput } from '../../src/domain/clock.js';
@@ -74,5 +75,34 @@ export function hourInput(spec: HourSpec): HourInput {
     }),
     scoring: { plays: [], dayparts: [], daypart: -1 },
     ...(spec.floor === undefined ? {} : { floor: spec.floor }),
+  };
+}
+
+/**
+ * A day input that runs one clock every hour, carrying the placed log forward
+ * behind the schedule reader so the rules see across hour boundaries.
+ */
+export function dayInput(spec: {
+  readonly clock: Clock;
+  readonly library: Library;
+  readonly hours: number;
+  readonly weekday?: number;
+  readonly dayStartHour?: number;
+  readonly floor?: number;
+}): DayInput {
+  return {
+    day: HOUR_DAY,
+    weekday: spec.weekday ?? 2,
+    dayStartHour: spec.dayStartHour ?? 5,
+    hours: spec.hours,
+    clockFor: () => spec.clock,
+    hourInputFor: (_hourIndex, clock, startsAt, cell) => {
+      const base = hourInput({
+        clock,
+        library: spec.library,
+        ...(spec.floor === undefined ? {} : { floor: spec.floor }),
+      });
+      return { ...base, startsAt, cell };
+    },
   };
 }
