@@ -18,7 +18,6 @@
  * its length. Those are what push the music around.
  */
 
-import { segueOverlap } from '../domain/segue.js';
 import type { Timing } from '../domain/segue.js';
 import { tenths } from '../util/duration.js';
 import type { Tenths } from '../util/duration.js';
@@ -31,6 +30,7 @@ import type { Library, LibraryEntry } from '../library/library.js';
 import { lookup } from '../library/library.js';
 import type { Placed, RuleContext, RuleSet, Slot } from '../rules/rule.js';
 import { makeScheduleView } from '../rules/schedule-view.js';
+import { advance, hole as holeAt, startTimeline } from './timeline.js';
 import { fillSlot } from './search.js';
 import type { Hole, Placement } from './search.js';
 import type { ScoreInput } from './score.js';
@@ -122,30 +122,27 @@ export function fillHour(input: HourInput): HourOutcome {
   const offset = input.positionOffset ?? 0;
   const slots: FilledSlot[] = [];
   const placed: Placed[] = [];
-  let cursor = input.startsAt;
-  let previous: Timing | undefined;
+  let timeline = startTimeline(input.startsAt);
   let holes = 0;
   let breaches = 0;
 
   for (const element of input.clock.elements) {
     if (element.kind !== 'music') {
       const { length, timing } = lengthOf(element, input.library);
-      const overlap = previous === undefined ? 0 : segueOverlap(previous, timing);
-      const at = tenths(cursor - overlap);
+      const { at, next } = advance(timeline, timing, length);
       slots.push({
         element,
         at,
         length,
         ...(element.kind === 'fixed' ? { cart: element.cart } : {}),
       });
-      cursor = tenths(at + length);
-      previous = timing;
+      timeline = next;
       continue;
     }
 
     const slot: Slot = {
       position: offset + element.position,
-      at: cursor,
+      at: timeline.cursor,
       category: element.category,
       cell: input.cell,
       day: input.day,
@@ -169,14 +166,13 @@ export function fillHour(input: HourInput): HourOutcome {
 
     if (!outcome.filled) {
       holes += 1;
-      slots.push({ element, at: cursor, length: tenths(0), hole: outcome.hole });
-      previous = undefined;
+      slots.push({ element, at: timeline.cursor, length: tenths(0), hole: outcome.hole });
+      timeline = holeAt(timeline);
       continue;
     }
 
     const entry = outcome.placement.entry;
-    const overlap = previous === undefined ? 0 : segueOverlap(previous, entry.cart.timing);
-    const at = tenths(cursor - overlap);
+    const { at, next } = advance(timeline, entry.cart.timing, entry.cart.runtime);
     if (outcome.placement.relaxedBy > 0) {
       breaches += 1;
     }
@@ -195,11 +191,10 @@ export function fillHour(input: HourInput): HourOutcome {
       placement: outcome.placement,
       cart: entry.cart.number,
     });
-    cursor = tenths(at + entry.cart.runtime);
-    previous = entry.cart.timing;
+    timeline = next;
   }
 
-  return { slots, placed, holes, breaches, endsAt: cursor };
+  return { slots, placed, holes, breaches, endsAt: timeline.cursor };
 }
 
 /** The music slots of an hour, for a report that only cares about them. */

@@ -30,10 +30,9 @@ import type { Placed } from '../rules/rule.js';
 import type { LibraryEntry } from '../library/library.js';
 import { POSITIONS_PER_HOUR, fillHour } from './hour.js';
 import type { HourInput, HourOutcome } from './hour.js';
-import { breachesFrom } from './breach.js';
 import type { Breach } from './breach.js';
-import { diagnose } from './hole.js';
 import type { HoleRecord } from './hole.js';
+import { collectFrom } from './collect.js';
 
 export interface DayInput {
   readonly day: BroadcastDay;
@@ -85,26 +84,6 @@ export function cellForHour(weekday: number, dayStartHour: number, hourIndex: nu
   return cellOf(weekday, (dayStartHour + hourIndex) % 24);
 }
 
-/**
- * The rules a placement gave up, as failures. The search knows the names rather
- * than the verdicts, because re-evaluating every relaxed rule to get its message
- * would double the cost of a day pass for a report nobody reads on most hours.
- */
-export const RELAXED_CODE = 'SCH-021';
-
-function relaxedFailures(
-  names: readonly string[],
-  tier: number,
-): { rule: string; tier: number; code: string; message: string; shortfall: number }[] {
-  return names.map((rule) => ({
-    rule,
-    tier: tier + 1,
-    code: RELAXED_CODE,
-    message: 'relaxed to fill the slot',
-    shortfall: 0,
-  }));
-}
-
 export function fillDay(input: DayInput): DayOutcome {
   const hours: FilledHour[] = [];
   const placed: Placed[] = [];
@@ -129,28 +108,9 @@ export function fillDay(input: DayInput): DayOutcome {
     hours.push({ hourIndex, clock: clock.name, cell, outcome });
     placed.push(...outcome.placed);
 
-    for (const slot of outcome.slots) {
-      if (slot.hole !== undefined) {
-        holes.push({
-          position: slot.element.position,
-          category: slot.element.kind === 'music' ? slot.element.category : slot.element.kind,
-          diagnosis: diagnose(slot.hole),
-        });
-        continue;
-      }
-      const placement = slot.placement;
-      if (placement === undefined || placement.relaxedBy === 0 || slot.cart === undefined) {
-        continue;
-      }
-      breaches.push(
-        ...breachesFrom({
-          position: slot.element.position,
-          at: slot.at,
-          cart: slot.cart,
-          failures: relaxedFailures(placement.breached, placement.tier),
-        }),
-      );
-    }
+    const collected = collectFrom(outcome.slots);
+    breaches.push(...collected.breaches);
+    holes.push(...collected.holes);
     cursor = outcome.endsAt;
   }
 
