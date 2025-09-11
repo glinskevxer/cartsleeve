@@ -1,5 +1,6 @@
 import type { HourInput } from '../../src/schedule/hour.js';
 import type { DayInput } from '../../src/schedule/day.js';
+import type { WeekInput } from '../../src/schedule/week.js';
 import type { Clock } from '../../src/domain/clock.js';
 import { makeClock } from '../../src/domain/clock.js';
 import type { ElementInput } from '../../src/domain/clock.js';
@@ -103,6 +104,38 @@ export function dayInput(spec: {
         ...(spec.floor === undefined ? {} : { floor: spec.floor }),
       });
       return { ...base, startsAt, cell };
+    },
+  };
+}
+
+/** A week input that runs the same clock every hour of every day. */
+export function weekInput(spec: {
+  readonly clock: Clock;
+  readonly library: Library;
+  readonly hours: number;
+  readonly days: number;
+  readonly floor?: number;
+}): WeekInput {
+  return {
+    from: HOUR_DAY,
+    days: spec.days,
+    dayInputFor: (day, weekday, placedSoFar) => {
+      const base = dayInput({
+        clock: spec.clock,
+        library: spec.library,
+        hours: spec.hours,
+        weekday,
+        ...(spec.floor === undefined ? {} : { floor: spec.floor }),
+      });
+      return {
+        ...base,
+        day,
+        // Only the earlier days go here. The day pass appends today's itself.
+        hourInputFor: (hourIndex, clock, startsAt, cell, placedToday) => ({
+          ...base.hourInputFor(hourIndex, clock, startsAt, cell, placedToday),
+          carried: placedSoFar,
+        }),
+      };
     },
   };
 }

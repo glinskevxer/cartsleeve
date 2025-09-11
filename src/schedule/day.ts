@@ -53,7 +53,17 @@ export interface DayInput {
     cell: number,
     placedSoFar: readonly Placed[],
   ) => HourInput;
+  /**
+   * What to add to every position in this day, so a run of days does not reuse
+   * the position space. Same reason the hour offsets within a day: the rules
+   * identify the slot they are filling by position, and a collision across days
+   * makes yesterday's placement invisible to today's.
+   */
+  readonly positionOffset?: number;
 }
+
+/** Positions reserved per day. No day runs anything like this many elements. */
+export const POSITIONS_PER_DAY = 100_000;
 
 export interface FilledHour {
   readonly hourIndex: number;
@@ -100,10 +110,13 @@ export function fillDay(input: DayInput): DayOutcome {
       continue;
     }
     const cell = cellForHour(input.weekday, input.dayStartHour, hourIndex);
+    const forHour = input.hourInputFor(hourIndex, clock, cursor, cell, placed);
+    // Extend whatever history the caller supplied rather than replacing it, so a
+    // week pass keeps yesterday behind today's rules.
     const outcome = fillHour({
-      ...input.hourInputFor(hourIndex, clock, cursor, cell, placed),
-      carried: [...placed],
-      positionOffset: hourIndex * POSITIONS_PER_HOUR,
+      ...forHour,
+      carried: [...(forHour.carried ?? []), ...placed],
+      positionOffset: (input.positionOffset ?? 0) + hourIndex * POSITIONS_PER_HOUR,
     });
     hours.push({ hourIndex, clock: clock.name, cell, outcome });
     placed.push(...outcome.placed);
