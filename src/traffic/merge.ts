@@ -22,8 +22,7 @@ import type { Problem } from '../util/problem.js';
 import { tenths } from '../util/duration.js';
 import type { Tenths } from '../util/duration.js';
 import type { FilledSlot } from '../schedule/hour.js';
-import { advance, hole as holeAt, startTimeline } from '../schedule/timeline.js';
-import type { Timing } from '../domain/segue.js';
+import { NO_SEGUE, Walk } from '../schedule/timeline.js';
 import { fillStopset } from './stopset.js';
 import type { Stopset } from './stopset.js';
 import type { Spot } from './spot.js';
@@ -32,8 +31,6 @@ const MRG = (n: number): string => codeFor('traffic', n);
 
 export const HOUR_MOVED = MRG(50);
 export const BREAK_EMPTY = MRG(51);
-
-const NO_TIMING: Timing = { intro: tenths(0), endType: 'cold', tail: tenths(0) };
 
 export interface MergedSlot extends FilledSlot {
   /** Where the slot lands once the real break lengths are in. */
@@ -65,7 +62,7 @@ export function mergeTraffic(input: MergeInput): MergeOutcome {
   const slots: MergedSlot[] = [];
   const stopsets: Stopset[] = [];
   const problems: Problem[] = [];
-  let timeline = startTimeline(input.startsAt);
+  const walk = new Walk(input.startsAt);
   const wasEnd = input.slots.reduce<number>(
     (end, slot) => Math.max(end, slot.at + slot.length),
     input.startsAt,
@@ -87,38 +84,32 @@ export function mergeTraffic(input: MergeInput): MergeOutcome {
           }),
         );
       }
-      const { at, next } = advance(timeline, NO_TIMING, filled.length);
+      const at = walk.place(NO_SEGUE, filled.length);
       slots.push({ ...slot, mergedAt: at, movedBy: tenths(at - slot.at), stopset: filled });
-      timeline = next;
       continue;
     }
     if (slot.hole !== undefined) {
-      slots.push({
-        ...slot,
-        mergedAt: timeline.cursor,
-        movedBy: tenths(timeline.cursor - slot.at),
-      });
-      timeline = holeAt(timeline);
+      const at = walk.skip();
+      slots.push({ ...slot, mergedAt: at, movedBy: tenths(at - slot.at) });
       continue;
     }
-    const timing = slot.placement === undefined ? NO_TIMING : slot.placement.entry.cart.timing;
-    const { at, next } = advance(timeline, timing, slot.length);
+    const timing = slot.placement === undefined ? NO_SEGUE : slot.placement.entry.cart.timing;
+    const at = walk.place(timing, slot.length);
     slots.push({ ...slot, mergedAt: at, movedBy: tenths(at - slot.at) });
-    timeline = next;
   }
 
-  const moved = tenths(timeline.cursor - wasEnd);
+  const moved = tenths(walk.endsAt - wasEnd);
   if (moved !== 0) {
     problems.push(
       warning(HOUR_MOVED, 'hour', 'changed length once the real breaks went in', {
         by: moved,
         was: wasEnd,
-        now: timeline.cursor,
+        now: walk.endsAt,
       }),
     );
   }
 
-  return { slots, stopsets, endsAt: timeline.cursor, hourMovedBy: moved, problems };
+  return { slots, stopsets, endsAt: walk.endsAt, hourMovedBy: moved, problems };
 }
 
 /** The music slots of a merged hour, which is what gets remeasured. */

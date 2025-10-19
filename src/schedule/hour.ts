@@ -30,7 +30,7 @@ import type { Library, LibraryEntry } from '../library/library.js';
 import { lookup } from '../library/library.js';
 import type { Placed, RuleContext, RuleSet, Slot } from '../rules/rule.js';
 import { makeScheduleView } from '../rules/schedule-view.js';
-import { advance, hole as holeAt, startTimeline } from './timeline.js';
+import { NO_SEGUE, Walk } from './timeline.js';
 import { fillSlot } from './search.js';
 import type { Hole, Placement } from './search.js';
 import type { ScoreInput } from './score.js';
@@ -97,23 +97,21 @@ export interface HourOutcome {
   readonly endsAt: Tenths;
 }
 
-const NO_TIMING: Timing = { intro: tenths(0), endType: 'cold', tail: tenths(0) };
-
 /** How long a non music element occupies. */
 function lengthOf(element: ClockElement, library: Library): { length: Tenths; timing: Timing } {
   switch (element.kind) {
     case 'fixed': {
       const found = lookup(library, element.cart);
       return found === undefined
-        ? { length: tenths(0), timing: NO_TIMING }
+        ? { length: tenths(0), timing: NO_SEGUE }
         : { length: found.cart.runtime, timing: found.cart.timing };
     }
     case 'stopset':
-      return { length: element.budget, timing: NO_TIMING };
+      return { length: element.budget, timing: NO_SEGUE };
     case 'news':
-      return { length: element.length, timing: NO_TIMING };
+      return { length: element.length, timing: NO_SEGUE };
     case 'music':
-      return { length: tenths(0), timing: NO_TIMING };
+      return { length: tenths(0), timing: NO_SEGUE };
   }
 }
 
@@ -122,27 +120,26 @@ export function fillHour(input: HourInput): HourOutcome {
   const offset = input.positionOffset ?? 0;
   const slots: FilledSlot[] = [];
   const placed: Placed[] = [];
-  let timeline = startTimeline(input.startsAt);
+  const walk = new Walk(input.startsAt);
   let holes = 0;
   let breaches = 0;
 
   for (const element of input.clock.elements) {
     if (element.kind !== 'music') {
       const { length, timing } = lengthOf(element, input.library);
-      const { at, next } = advance(timeline, timing, length);
+      const at = walk.place(timing, length);
       slots.push({
         element,
         at,
         length,
         ...(element.kind === 'fixed' ? { cart: element.cart } : {}),
       });
-      timeline = next;
       continue;
     }
 
     const slot: Slot = {
       position: offset + element.position,
-      at: timeline.cursor,
+      at: walk.cursor,
       category: element.category,
       cell: input.cell,
       day: input.day,
@@ -166,13 +163,12 @@ export function fillHour(input: HourInput): HourOutcome {
 
     if (!outcome.filled) {
       holes += 1;
-      slots.push({ element, at: timeline.cursor, length: tenths(0), hole: outcome.hole });
-      timeline = holeAt(timeline);
+      slots.push({ element, at: walk.skip(), length: tenths(0), hole: outcome.hole });
       continue;
     }
 
     const entry = outcome.placement.entry;
-    const { at, next } = advance(timeline, entry.cart.timing, entry.cart.runtime);
+    const at = walk.place(entry.cart.timing, entry.cart.runtime);
     if (outcome.placement.relaxedBy > 0) {
       breaches += 1;
     }
@@ -191,10 +187,9 @@ export function fillHour(input: HourInput): HourOutcome {
       placement: outcome.placement,
       cart: entry.cart.number,
     });
-    timeline = next;
   }
 
-  return { slots, placed, holes, breaches, endsAt: timeline.cursor };
+  return { slots, placed, holes, breaches, endsAt: walk.endsAt };
 }
 
 /** The music slots of an hour, for a report that only cares about them. */

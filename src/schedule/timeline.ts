@@ -58,3 +58,46 @@ export function hole(timeline: Timeline): Timeline {
 export function savedBy(timeline: Timeline, naiveEnd: Tenths): Tenths {
   return tenths(naiveEnd - timeline.cursor);
 }
+
+/** Timing for something that has no segue of its own: a break, news, a hole. */
+export const NO_SEGUE: Timing = { intro: tenths(0), endType: 'cold', tail: tenths(0) };
+
+/**
+ * A cursor walking an hour, placing items and skipping holes.
+ *
+ * Both the schedule pass and the traffic merge walk a list of slots advancing a
+ * timeline, and both were carrying the same three lines at every branch: work
+ * out where the item starts, remember it, move the cursor on. Wrapping it means
+ * the two loops differ only in what they are placing, which is the only way they
+ * should differ, and it makes the hole rule impossible to forget on one of them.
+ */
+export class Walk {
+  private timeline: Timeline;
+
+  constructor(startsAt: Tenths) {
+    this.timeline = startTimeline(startsAt);
+  }
+
+  /** Where the next item would land, before anything is placed there. */
+  get cursor(): Tenths {
+    return this.timeline.cursor;
+  }
+
+  get endsAt(): Tenths {
+    return this.timeline.cursor;
+  }
+
+  /** Place an item and return where it starts. */
+  place(timing: Timing, length: Tenths): Tenths {
+    const step = advance(this.timeline, timing, length);
+    this.timeline = step.next;
+    return step.at;
+  }
+
+  /** Record a hole. The cursor stays put and nothing overlaps into it. */
+  skip(): Tenths {
+    const at = this.timeline.cursor;
+    this.timeline = hole(this.timeline);
+    return at;
+  }
+}

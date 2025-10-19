@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { advance, hole, savedBy, startOf, startTimeline } from '../../src/schedule/timeline.js';
+import {
+  NO_SEGUE,
+  Walk,
+  advance,
+  hole,
+  savedBy,
+  startOf,
+  startTimeline,
+} from '../../src/schedule/timeline.js';
 import type { Timing } from '../../src/domain/segue.js';
 import { tenths } from '../../src/util/duration.js';
 
-const cold: Timing = { intro: tenths(0), endType: 'cold', tail: tenths(0) };
+const cold: Timing = NO_SEGUE;
 const fading = (intro: number, tail: number): Timing => ({
   intro: tenths(intro),
   endType: 'fade',
@@ -98,5 +106,57 @@ describe('hole', () => {
 
   it('is harmless at the very start', () => {
     expect(hole(startTimeline(tenths(600))).cursor).toBe(600);
+  });
+});
+
+describe('Walk', () => {
+  it('starts where it was told to', () => {
+    expect(new Walk(tenths(600)).cursor).toBe(600);
+    expect(new Walk(tenths(600)).endsAt).toBe(600);
+  });
+
+  it('places an item and moves on', () => {
+    const walk = new Walk(tenths(0));
+    expect(walk.place(cold, tenths(1800))).toBe(0);
+    expect(walk.cursor).toBe(1800);
+    expect(walk.place(cold, tenths(1800))).toBe(1800);
+    expect(walk.endsAt).toBe(3600);
+  });
+
+  it('overlaps a segue the same way the timeline does', () => {
+    const walk = new Walk(tenths(0));
+    walk.place(fading(0, 60), tenths(1800));
+    expect(walk.place(fading(90, 60), tenths(1800))).toBe(1740);
+  });
+
+  it('does not move the cursor on a skip', () => {
+    const walk = new Walk(tenths(0));
+    walk.place(cold, tenths(1800));
+    expect(walk.skip()).toBe(1800);
+    expect(walk.cursor).toBe(1800);
+  });
+
+  it('does not overlap into what a skip stood for', () => {
+    const walk = new Walk(tenths(0));
+    walk.place(fading(0, 60), tenths(1800));
+    walk.skip();
+    expect(walk.place(fading(90, 60), tenths(1800))).toBe(1800);
+  });
+
+  it('agrees with the functions it is built on', () => {
+    const walk = new Walk(tenths(0));
+    let timeline = startTimeline(tenths(0));
+    for (const timing of [cold, fading(90, 60), fading(0, 60)]) {
+      const byHand = advance(timeline, timing, tenths(1800));
+      expect(walk.place(timing, tenths(1800))).toBe(byHand.at);
+      timeline = byHand.next;
+    }
+    expect(walk.endsAt).toBe(timeline.cursor);
+  });
+
+  it('places nothing at all without moving', () => {
+    const walk = new Walk(tenths(600));
+    expect(walk.place(cold, tenths(0))).toBe(600);
+    expect(walk.endsAt).toBe(600);
   });
 });
