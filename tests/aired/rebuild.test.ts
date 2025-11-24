@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  EMPTY_REBUILD_STATE,
   IMPLAUSIBLE_LENGTH,
   MAX_PLAUSIBLE_MS,
   ORPHAN_END,
   SKIPPED,
   UNTERMINATED,
   airingsOf,
+  applyEvent,
+  closeState,
   measured,
   rebuildAired,
   totalAired,
@@ -196,5 +199,62 @@ describe('reading the rebuild', () => {
 
   it('totals nothing when nothing was measured', () => {
     expect(totalAired(stream([event({ kind: 'start', at: BASE })]))).toBe(0);
+  });
+});
+
+describe('the reducer underneath', () => {
+  it('starts with nothing open and nothing found', () => {
+    expect(EMPTY_REBUILD_STATE.airings).toEqual([]);
+    expect(EMPTY_REBUILD_STATE.open.size).toBe(0);
+  });
+
+  it('opens a start and closes it on the matching end', () => {
+    const opened = applyEvent(EMPTY_REBUILD_STATE, event({ kind: 'start', at: BASE }));
+    expect(opened.open.size).toBe(1);
+    expect(opened.airings).toEqual([]);
+    const closed = applyEvent(opened, event({ kind: 'end', at: BASE + 1000 }));
+    expect(closed.open.size).toBe(0);
+    expect(closed.airings).toHaveLength(1);
+  });
+
+  it('leaves an error event alone entirely', () => {
+    const after = applyEvent(EMPTY_REBUILD_STATE, event({ kind: 'error', at: BASE }));
+    expect(after).toBe(EMPTY_REBUILD_STATE);
+  });
+
+  it('does not mutate the state it was given', () => {
+    const opened = applyEvent(EMPTY_REBUILD_STATE, event({ kind: 'start', at: BASE }));
+    applyEvent(opened, event({ kind: 'end', at: BASE + 1000 }));
+    expect(opened.open.size).toBe(1);
+    expect(opened.airings).toEqual([]);
+  });
+
+  it('closes whatever is still open at the end of the stream', () => {
+    const opened = applyEvent(EMPTY_REBUILD_STATE, event({ kind: 'start', at: BASE }));
+    const closed = closeState(opened);
+    expect(closed.airings).toHaveLength(1);
+    expect(closed.airings[0]?.length).toBeUndefined();
+    expect(closed.open.size).toBe(0);
+  });
+
+  it('closes nothing when nothing is open', () => {
+    expect(closeState(EMPTY_REBUILD_STATE).airings).toEqual([]);
+  });
+
+  it('agrees with the whole rebuild when folded by hand', () => {
+    const events = [
+      event({ kind: 'start', cart: 'M0001', at: BASE }),
+      event({ kind: 'end', cart: 'M0001', at: BASE + 1000 }),
+      event({ kind: 'skip', cart: 'M0002', at: BASE + 2000 }),
+      event({ kind: 'start', cart: 'M0003', at: BASE + 3000 }),
+    ];
+    let state = EMPTY_REBUILD_STATE;
+    for (const each of events) {
+      state = applyEvent(state, each);
+    }
+    const folded = closeState(state);
+    const whole = stream(events);
+    expect(folded.airings).toHaveLength(whole.airings.length);
+    expect(folded.problems).toHaveLength(whole.problems.length);
   });
 });

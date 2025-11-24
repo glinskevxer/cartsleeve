@@ -18,6 +18,7 @@
 
 import { codeFor, info, warning } from '../util/problem.js';
 import type { Problem } from '../util/problem.js';
+import { groupBy } from '../util/ordering.js';
 import type { CartNumber } from '../util/ids.js';
 import { isMusicCart } from '../util/ids.js';
 import type { Library } from '../library/library.js';
@@ -109,14 +110,5 @@ export function payable(items: readonly Unscheduled[]): Unscheduled[] {
 }
 
 export function byKind(items: readonly Unscheduled[]): Map<UnscheduledKind, Unscheduled[]> {
-  const grouped = new Map<UnscheduledKind, Unscheduled[]>();
-  for (const item of items) {
-    const bucket = grouped.get(item.kind);
-    if (bucket === undefined) {
-      grouped.set(item.kind, [item]);
-    } else {
-      bucket.push(item);
-    }
-  }
-  return grouped;
+  return groupBy(items, (item) => item.kind);
 }

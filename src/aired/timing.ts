@@ -17,7 +17,7 @@
 
 import { codeFor, error, info, warning } from '../util/problem.js';
 import type { Problem } from '../util/problem.js';
-import { ascending } from '../util/ordering.js';
+import { ascending, groupBy } from '../util/ordering.js';
 import type { CartNumber } from '../util/ids.js';
 import type { Airing } from './rebuild.js';
 
@@ -53,15 +53,10 @@ export function measureTiming(
   planned: readonly PlannedStart[],
   airings: readonly Airing[],
 ): Deviation[] {
-  const byCart = new Map<CartNumber, Airing[]>();
-  for (const airing of airings) {
-    const bucket = byCart.get(airing.cart);
-    if (bucket === undefined) {
-      byCart.set(airing.cart, [airing]);
-    } else {
-      bucket.push(airing);
-    }
-  }
+  // A copy, because the match below consumes it one airing at a time.
+  const byCart = new Map(
+    [...groupBy(airings, (airing) => airing.cart)].map(([cart, list]) => [cart, [...list]]),
+  );
   const out: Deviation[] = [];
   for (const item of planned) {
     const candidates = byCart.get(item.cart);

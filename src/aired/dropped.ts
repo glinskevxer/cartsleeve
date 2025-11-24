@@ -13,6 +13,7 @@
 
 import { codeFor, error, info, warning } from '../util/problem.js';
 import type { Problem } from '../util/problem.js';
+import { groupBy } from '../util/ordering.js';
 import type { CartNumber } from '../util/ids.js';
 import type { AutomationEvent, EventStream } from './event.js';
 import { eventsOfKind } from './event.js';
@@ -122,16 +123,7 @@ export function toProblem(drop: Drop): Problem {
 }
 
 export function byReason(drops: readonly Drop[]): Map<DropReason, Drop[]> {
-  const grouped = new Map<DropReason, Drop[]>();
-  for (const drop of drops) {
-    const bucket = grouped.get(drop.reason);
-    if (bucket === undefined) {
-      grouped.set(drop.reason, [drop]);
-    } else {
-      bucket.push(drop);
-    }
-  }
-  return grouped;
+  return groupBy(drops, (drop) => drop.reason);
 }
 
 /** The drops worth acting on, which is anything not a deliberate skip. */
