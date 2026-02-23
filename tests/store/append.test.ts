@@ -136,3 +136,56 @@ describe('reading back', () => {
     expect(Journal.open(store).readAll().problems.length).toBeGreaterThan(0);
   });
 });
+
+describe('the index behind the reads', () => {
+  function filled(): Journal {
+    const { journal } = opened();
+    journal.append('cart.carded', { cart: 'M0001' }, BASE);
+    journal.append('cart.carded', { cart: 'M0002' }, BASE + 1000);
+    journal.append('clock.changed', { clock: 'AMD' }, BASE + 2000);
+    return journal;
+  }
+
+  it('takes a sequence range, both bounds inclusive', () => {
+    expect(
+      filled()
+        .range(2, 3)
+        .map((each) => each.sequence),
+    ).toEqual([2, 3]);
+    expect(
+      filled()
+        .range(1, 1)
+        .map((each) => each.sequence),
+    ).toEqual([1]);
+    expect(filled().range(3, 2)).toEqual([]);
+  });
+
+  it('names the kinds it holds', () => {
+    expect(filled().kinds()).toEqual(['cart.carded', 'clock.changed']);
+    expect(opened().journal.kinds()).toEqual([]);
+  });
+
+  it('sees a record appended after it was opened', () => {
+    const journal = filled();
+    expect(journal.ofKind('cart.carded')).toHaveLength(2);
+    journal.append('cart.carded', { cart: 'M0003' }, BASE + 3000);
+    expect(journal.ofKind('cart.carded')).toHaveLength(3);
+    expect(journal.length).toBe(4);
+  });
+
+  it('indexes what was already on disk when it opened', () => {
+    const store = new MemoryStorage();
+    const first = Journal.open(store);
+    first.append('cart.carded', { cart: 'M0001' }, BASE);
+    first.append('clock.changed', { clock: 'AMD' }, BASE + 1000);
+    const second = Journal.open(store);
+    expect(second.ofKind('cart.carded')).toHaveLength(1);
+    expect(second.length).toBe(2);
+  });
+
+  it('agrees with walking the records by hand', () => {
+    const journal = filled();
+    const walked = journal.readAll().records.filter((each) => each.kind === 'cart.carded');
+    expect(journal.ofKind('cart.carded')).toEqual(walked);
+  });
+});
