@@ -9,6 +9,8 @@ import {
   encodeJournal,
   encodeRecord,
   nextSequence,
+  readNumber,
+  readString,
 } from '../../src/store/journal.js';
 import type { JournalRecord } from '../../src/store/journal.js';
 import { expectErr, expectOk } from '../support/result.js';
@@ -147,5 +149,33 @@ describe('nextSequence', () => {
 
   it('does not care about the order', () => {
     expect(nextSequence([record({ sequence: 7 }), record({ sequence: 1 })])).toBe(8);
+  });
+});
+
+describe('reading a payload field', () => {
+  it('reads a string and a number', () => {
+    const payload = { name: 'AMD', count: 4 };
+    expect(readString(payload, 'name')).toBe('AMD');
+    expect(readNumber(payload, 'count')).toBe(4);
+  });
+
+  it('falls back when the field is the wrong type', () => {
+    const payload = { name: { nested: true }, count: 'four' };
+    expect(readString(payload, 'name')).toBe('');
+    expect(readNumber(payload, 'count')).toBe(0);
+  });
+
+  it('falls back when the field is absent', () => {
+    expect(readString({}, 'name', 'none')).toBe('none');
+    expect(readNumber({}, 'count', -1)).toBe(-1);
+  });
+
+  it('does not accept a non finite number', () => {
+    expect(readNumber({ count: Number.NaN }, 'count', 7)).toBe(7);
+    expect(readNumber({ count: Number.POSITIVE_INFINITY }, 'count', 7)).toBe(7);
+  });
+
+  it('reads an empty string as itself rather than the fallback', () => {
+    expect(readString({ name: '' }, 'name', 'none')).toBe('');
   });
 });

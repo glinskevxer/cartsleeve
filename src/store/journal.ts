@@ -160,6 +160,32 @@ export function decodeJournal(text: string): JournalRead {
   return { records, problems, truncated };
 }
 
+/**
+ * Read a field off a payload.
+ *
+ * A payload is whatever was written, so every field is unknown until it has been
+ * checked. Reading one that is the wrong type gives the fallback rather than a
+ * stringified object, which is what a bare String() would produce and what a
+ * report would then print.
+ */
+export function readString(
+  payload: Readonly<Record<string, unknown>>,
+  key: string,
+  fallback = '',
+): string {
+  const value = payload[key];
+  return typeof value === 'string' ? value : fallback;
+}
+
+export function readNumber(
+  payload: Readonly<Record<string, unknown>>,
+  key: string,
+  fallback = 0,
+): number {
+  const value = payload[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
 export function nextSequence(records: readonly JournalRecord[]): number {
   return records.reduce((highest, record) => Math.max(highest, record.sequence), 0) + 1;
 }
