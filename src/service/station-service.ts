@@ -16,10 +16,10 @@
  * start and impossible to get subtly wrong.
  */
 
-import { codeFor, error } from '../util/problem.js';
 import type { Problem } from '../util/problem.js';
 import { err, ok } from '../util/result.js';
 import type { Result } from '../util/result.js';
+import { ALREADY_THERE, NOT_FOUND, requireAbsent, requirePresent } from './guard.js';
 import type { CartNumber, CategoryCode } from '../util/ids.js';
 import type { Station } from '../domain/station.js';
 import type { Category } from '../domain/category.js';
@@ -32,10 +32,7 @@ import { EMPTY_HISTORY, withCarding } from '../library/membership.js';
 import type { History } from '../library/membership.js';
 import type { Journal } from '../store/append.js';
 
-const SVC = (n: number): string => codeFor('store', n);
-
-export const NOT_FOUND = SVC(30);
-export const ALREADY_THERE = SVC(31);
+export { ALREADY_THERE, NOT_FOUND };
 
 export interface StationState {
   readonly station: Station;
@@ -67,8 +64,13 @@ export class StationService {
 
   /** Add a cart, refusing one that is already there. */
   addCart(entry: LibraryEntry, at: number): Result<StationState, Problem[]> {
-    if (lookup(this.state.library, entry.cart.number) !== undefined) {
-      return err([error(ALREADY_THERE, entry.cart.number, 'is already in the library')]);
+    const free = requireAbsent(
+      lookup(this.state.library, entry.cart.number) !== undefined,
+      entry.cart.number,
+      'in the library',
+    );
+    if (!free.ok) {
+      return err(free.error);
     }
     this.journal.append(
       'cart.added',
@@ -81,8 +83,13 @@ export class StationService {
 
   /** Replace a cart that is already there, refusing one that is not. */
   updateCart(entry: LibraryEntry, at: number): Result<StationState, Problem[]> {
-    if (lookup(this.state.library, entry.cart.number) === undefined) {
-      return err([error(NOT_FOUND, entry.cart.number, 'is not in the library')]);
+    const found = requirePresent(
+      lookup(this.state.library, entry.cart.number),
+      entry.cart.number,
+      'in the library',
+    );
+    if (!found.ok) {
+      return err(found.error);
     }
     this.journal.append('cart.updated', { cart: entry.cart.number }, at);
     this.state = { ...this.state, library: withEntry(this.state.library, entry) };
@@ -90,8 +97,9 @@ export class StationService {
   }
 
   removeCart(cart: CartNumber, at: number): Result<StationState, Problem[]> {
-    if (lookup(this.state.library, cart) === undefined) {
-      return err([error(NOT_FOUND, cart, 'is not in the library')]);
+    const found = requirePresent(lookup(this.state.library, cart), cart, 'in the library');
+    if (!found.ok) {
+      return err(found.error);
     }
     this.journal.append('cart.removed', { cart }, at);
     this.state = { ...this.state, library: withoutCart(this.state.library, cart) };
@@ -119,8 +127,9 @@ export class StationService {
   }
 
   addCategory(category: Category, at: number): Result<StationState, Problem[]> {
-    if (this.state.categories.has(category.code)) {
-      return err([error(ALREADY_THERE, category.code, 'is already defined')]);
+    const free = requireAbsent(this.state.categories.has(category.code), category.code, 'defined');
+    if (!free.ok) {
+      return err(free.error);
     }
     const categories = new Map(this.state.categories);
     categories.set(category.code, category);
@@ -130,8 +139,9 @@ export class StationService {
   }
 
   addClock(clock: Clock, at: number): Result<StationState, Problem[]> {
-    if (this.state.clocks.has(clock.name)) {
-      return err([error(ALREADY_THERE, clock.name, 'is already defined')]);
+    const free = requireAbsent(this.state.clocks.has(clock.name), clock.name, 'defined');
+    if (!free.ok) {
+      return err(free.error);
     }
     const clocks = new Map(this.state.clocks);
     clocks.set(clock.name, clock);
@@ -142,8 +152,9 @@ export class StationService {
 
   /** Replace a clock, which changes every hour of the grid that runs it. */
   replaceClock(clock: Clock, at: number): Result<StationState, Problem[]> {
-    if (!this.state.clocks.has(clock.name)) {
-      return err([error(NOT_FOUND, clock.name, 'is not defined')]);
+    const found = requirePresent(this.state.clocks.get(clock.name), clock.name, 'defined');
+    if (!found.ok) {
+      return err(found.error);
     }
     const clocks = new Map(this.state.clocks);
     clocks.set(clock.name, clock);
