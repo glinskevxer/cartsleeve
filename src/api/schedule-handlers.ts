@@ -17,8 +17,8 @@ import { z } from 'zod';
 import { BAD_PARAMS, refuse, succeed } from './envelope.js';
 import type { ApiRequest, ApiResponse } from './envelope.js';
 import type { Route } from './dispatch.js';
+import { route } from './handler.js';
 import { error } from '../util/problem.js';
-import type { Problem } from '../util/problem.js';
 import { formatDuration, tenths } from '../util/duration.js';
 import type { BroadcastDay } from '../util/time.js';
 import type { Clock } from '../domain/clock.js';
@@ -45,12 +45,6 @@ const scheduleSchema = z.object({
   /** Carry yesterday's placements so separation reaches across midnight. */
   carry: z.boolean().optional(),
 });
-
-function paramProblems(issues: readonly z.ZodIssue[]): Problem[] {
-  return issues.map((issue) =>
-    error(BAD_PARAMS, issue.path.length === 0 ? 'params' : issue.path.join('.'), issue.message),
-  );
-}
 
 /**
  * What the session remembers between requests. Only the last day, on purpose:
@@ -102,19 +96,20 @@ export function scheduleRoutes(
   schedule: ScheduleService,
   session: ScheduleSession,
 ): Route[] {
+  /** Both readers want the same refusal when nothing has been scheduled yet. */
+  const noDay = (request: ApiRequest): ApiResponse<never> =>
+    refuse(request, [error(NOT_FOUND, 'schedule', 'has not run in this session yet')]);
+
   return [
-    {
+    route({
       op: 'schedule.day',
       summary: 'schedule one broadcast day',
       writes: true,
-      handler: (request: ApiRequest): ApiResponse<unknown> => {
-        const params = scheduleSchema.safeParse(request.params);
-        if (!params.success) {
-          return refuse(request, paramProblems(params.error.issues));
-        }
+      params: scheduleSchema,
+      answer: (params, request) => {
         const state = station.current();
-        const named = params.data.clock;
-        const perHour = params.data.clocks ?? {};
+        const named = params.clock;
+        const perHour = params.clocks ?? {};
         if (named === undefined && Object.keys(perHour).length === 0) {
           return refuse(request, [
             error(BAD_PARAMS, 'clock', 'was not given, and neither was a clock for any hour'),
@@ -132,45 +127,45 @@ export function scheduleRoutes(
           );
         }
         const clockFor = (hourIndex: number): Clock | undefined => {
-          const forHour = perHour[String(hourIndex)];
-          const name = forHour ?? named;
+          const name = perHour[String(hourIndex)] ?? named;
           return name === undefined ? undefined : state.clocks.get(name);
         };
         const outcome = schedule.scheduleDay(
           state,
-          params.data.day,
-          params.data.weekday,
+          params.day,
+          params.weekday,
           clockFor,
-          params.data.carry === true ? session.carried() : [],
+          params.carry === true ? session.carried() : [],
           {
-            ...(params.data.hours === undefined ? {} : { hours: params.data.hours }),
-            ...(params.data.floor === undefined ? {} : { floor: params.data.floor }),
+            ...(params.hours === undefined ? {} : { hours: params.hours }),
+            ...(params.floor === undefined ? {} : { floor: params.floor }),
           },
         );
-        session.remember(params.data.day, outcome);
+        session.remember(params.day, outcome);
         return succeed(request, summarise(outcome), outcome.problems);
       },
-    },
-    {
+    }),
+    route({
       op: 'schedule.last',
       summary: 'what the last scheduled day came to',
       writes: false,
-      handler: (request: ApiRequest): ApiResponse<unknown> => {
+      params: z.object({}),
+      answer: (_params, request) => {
         const outcome = session.outcome();
-        if (outcome === undefined) {
-          return refuse(request, [error(NOT_FOUND, 'schedule', 'has not run in this session yet')]);
-        }
-        return succeed(request, { day: session.label(), ...summarise(outcome) });
+        return outcome === undefined
+          ? noDay(request)
+          : succeed(request, { day: session.label(), ...summarise(outcome) });
       },
-    },
-    {
+    }),
+    route({
       op: 'schedule.holes',
       summary: 'the slots the last day could not fill, and why',
       writes: false,
-      handler: (request: ApiRequest): ApiResponse<unknown> => {
+      params: z.object({}),
+      answer: (_params, request) => {
         const outcome = session.outcome();
         if (outcome === undefined) {
-          return refuse(request, [error(NOT_FOUND, 'schedule', 'has not run in this session yet')]);
+          return noDay(request);
         }
         return succeed(
           request,
@@ -181,6 +176,6 @@ export function scheduleRoutes(
           })),
         );
       },
-    },
+    }),
   ];
 }

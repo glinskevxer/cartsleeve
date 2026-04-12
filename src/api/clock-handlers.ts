@@ -6,15 +6,15 @@
  * than the library ones in one respect: replacing a clock reports what the
  * replacement did to the hour, not just that it worked.
  *
- * The music count and the stopset budget are returned on every write because
- * they are what a music director checks after an edit, and making them ask for
- * them in a second request means half the time they will not.
+ * The music count and the stopset budget come back on every write because they
+ * are what a music director checks after an edit, and making them ask in a
+ * second request means half the time they will not.
  */
 
 import { z } from 'zod';
 import { BAD_PARAMS, refuse, succeed } from './envelope.js';
-import type { ApiRequest, ApiResponse } from './envelope.js';
 import type { Route } from './dispatch.js';
+import { answering, built, defined, route } from './handler.js';
 import { error, warning } from '../util/problem.js';
 import type { Problem } from '../util/problem.js';
 import {
@@ -42,30 +42,14 @@ const elementSchema = z.object({
   noClose: z.boolean().optional(),
 });
 
-const clockSchema = z.object({
-  name: z.string().min(1),
-  elements: z.array(elementSchema).min(1),
-});
-
-const nameSchema = z.object({ name: z.string().min(1) });
-
-type Defined<T> = { [K in keyof T]: Exclude<T[K], undefined> };
-
-function defined<T extends Record<string, unknown>>(value: T): Defined<T> {
-  const kept: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(value)) {
-    if (item !== undefined) {
-      kept[key] = item;
-    }
-  }
-  return kept as Defined<T>;
-}
-
-function paramProblems(issues: readonly z.ZodIssue[]): Problem[] {
-  return issues.map((issue) =>
-    error(BAD_PARAMS, issue.path.length === 0 ? 'params' : issue.path.join('.'), issue.message),
-  );
-}
+const clockSchema = built(
+  z.object({ name: z.string().min(1), elements: z.array(elementSchema).min(1) }),
+  (input) =>
+    makeClock(
+      input.name,
+      input.elements.map((element) => defined(element)),
+    ),
+);
 
 /** What the operator wants to see after an edit, without asking twice. */
 function describeClock(clock: Clock): Record<string, unknown> {
@@ -79,109 +63,83 @@ function describeClock(clock: Clock): Record<string, unknown> {
 }
 
 /**
- * A clock that leaves the hour short is legal and is sometimes what the
- * operator meant, so it is a warning on a success rather than a refusal.
+ * A clock that fills no music is legal and is sometimes what the operator
+ * meant, so it is a warning on a success rather than a refusal.
  */
 function shortHourWarning(clock: Clock): Problem[] {
-  const music = musicCount(clock);
-  if (music > 0) {
-    return [];
-  }
-  return [warning(BAD_PARAMS, clock.name, 'has no music element and will fill nothing')];
+  return musicCount(clock) > 0
+    ? []
+    : [warning(BAD_PARAMS, clock.name, 'has no music element and will fill nothing')];
 }
 
 export function clockRoutes(service: StationService): Route[] {
   return [
-    {
+    route({
       op: 'clock.add',
       summary: 'define a clock',
       writes: true,
-      handler: (request: ApiRequest): ApiResponse<unknown> => {
-        const params = clockSchema.safeParse(request.params);
-        if (!params.success) {
-          return refuse(request, paramProblems(params.error.issues));
-        }
-        const clock = makeClock(
-          params.data.name,
-          params.data.elements.map((element) => defined(element)),
-        );
-        if (!clock.ok) {
-          return refuse(request, clock.error);
-        }
-        const added = service.addClock(clock.value, request.at);
-        return added.ok
-          ? succeed(request, describeClock(clock.value), shortHourWarning(clock.value))
-          : refuse(request, added.error);
-      },
-    },
-    {
+      params: clockSchema,
+      answer: (clock, request) =>
+        answering(
+          request,
+          service.addClock(clock, request.at),
+          () => describeClock(clock),
+          shortHourWarning(clock),
+        ),
+    }),
+    route({
       op: 'clock.replace',
       summary: 'replace a clock, which changes every hour that runs it',
       writes: true,
-      handler: (request: ApiRequest): ApiResponse<unknown> => {
-        const params = clockSchema.safeParse(request.params);
-        if (!params.success) {
-          return refuse(request, paramProblems(params.error.issues));
-        }
-        const clock = makeClock(
-          params.data.name,
-          params.data.elements.map((element) => defined(element)),
-        );
-        if (!clock.ok) {
-          return refuse(request, clock.error);
-        }
-        const before = service.current().clocks.get(params.data.name);
-        const replaced = service.replaceClock(clock.value, request.at);
-        if (!replaced.ok) {
-          return refuse(request, replaced.error);
-        }
-        return succeed(
+      params: clockSchema,
+      answer: (clock, request) => {
+        const before = service.current().clocks.get(clock.name);
+        return answering(
           request,
-          {
-            ...describeClock(clock.value),
+          service.replaceClock(clock, request.at),
+          () => ({
+            ...describeClock(clock),
             musicWas: before === undefined ? 0 : musicCount(before),
-          },
-          shortHourWarning(clock.value),
+          }),
+          shortHourWarning(clock),
         );
       },
-    },
-    {
+    }),
+    route({
       op: 'clock.get',
       summary: 'read one clock and its elements',
       writes: false,
-      handler: (request: ApiRequest): ApiResponse<unknown> => {
-        const params = nameSchema.safeParse(request.params);
-        if (!params.success) {
-          return refuse(request, paramProblems(params.error.issues));
-        }
-        const clock = service.current().clocks.get(params.data.name);
-        if (clock === undefined) {
-          return refuse(request, [error(NOT_FOUND, params.data.name, 'is not a defined clock')]);
-        }
-        return succeed(request, {
-          ...describeClock(clock),
-          lines: clock.elements.map((element) => describeElement(element)),
-        });
+      params: z.object({ name: z.string().min(1) }),
+      answer: (params, request) => {
+        const clock = service.current().clocks.get(params.name);
+        return clock === undefined
+          ? refuse(request, [error(NOT_FOUND, params.name, 'is not a defined clock')])
+          : succeed(request, {
+              ...describeClock(clock),
+              lines: clock.elements.map((element) => describeElement(element)),
+            });
       },
-    },
-    {
+    }),
+    route({
       op: 'clock.list',
       summary: 'list the clocks the station has',
       writes: false,
-      handler: (request: ApiRequest): ApiResponse<unknown> =>
+      params: z.object({}),
+      answer: (_params, request) =>
         succeed(
           request,
           [...service.current().clocks.values()]
             .sort((a, b) => a.name.localeCompare(b.name))
             .map((clock) => describeClock(clock)),
         ),
-    },
-    {
+    }),
+    route({
       op: 'clock.hour',
       summary: 'the length of an hour, for a caller checking its arithmetic',
       writes: false,
-      handler: (request: ApiRequest): ApiResponse<unknown> =>
+      params: z.object({}),
+      answer: (_params, request) =>
         succeed(request, { tenths: HOUR_TENTHS, length: formatDuration(HOUR_TENTHS) }),
-    },
+    }),
   ];
 }
