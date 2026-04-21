@@ -167,7 +167,8 @@ export class ScheduleService {
   }
 }
 
-function fallbackEras(): EraMap {
+/** The era bands used when the caller names none. Shared with the api. */
+export function fallbackEras(): EraMap {
   const built = makeEraMap(COUNTRY_BANDS);
   return built.ok ? built.value : { bands: [] };
 }
