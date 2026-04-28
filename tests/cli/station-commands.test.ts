@@ -293,6 +293,13 @@ describe('clock add', () => {
     expect(it0.failures[0]).toHaveLength(2);
   });
 
+  it('sends nothing when no element was named at all', () => {
+    const it0 = spy();
+    run(clockCommand(it0.run, it0.out, it0.fail), ['add', 'AMD']);
+    expect(it0.calls).toHaveLength(0);
+    expect(it0.failures[0]?.[0]).toContain('AMD');
+  });
+
   it('replaces through the replace operation', () => {
     const it0 = spy();
     run(clockCommand(it0.run, it0.out, it0.fail), ['replace', 'AMD', '--element', 'music,0:00']);

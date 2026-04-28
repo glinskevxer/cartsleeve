@@ -239,14 +239,19 @@ export function clockCommand(run: Runner, out: Sink, fail: (lines: string[]) => 
       .command(verb)
       .description(`${verb} a clock`)
       .argument('<name>', 'clock name')
-      .requiredOption(
+      .option(
         '--element <spec>',
         'kind,target,key=value, repeatable',
         collectElement,
         [] as string[],
       )
       .action((name: string, options: Record<string, unknown>) => {
-        const built = clockRequest(name, (options['element'] as string[] | undefined) ?? []);
+        const named = (options['element'] as string[] | undefined) ?? [];
+        if (named.length === 0) {
+          fail([`${name} would have no elements, so name at least one`]);
+          return;
+        }
+        const built = clockRequest(name, named);
         if ('problems' in built) {
           fail(built.problems.map((problem) => `bad element "${problem.text}": ${problem.reason}`));
           return;
