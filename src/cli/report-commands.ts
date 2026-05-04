@@ -27,7 +27,7 @@ export interface DaypartSpec {
 }
 
 /** Days as `1-5`, or as `0+6` for a set that is not a run. */
-function parseDays(text: string): number[] | undefined {
+export function parseDays(text: string): number[] | undefined {
   const days: number[] = [];
   for (const part of text.split('+')) {
     const range = /^(\d)-(\d)$/.exec(part);
@@ -114,6 +114,46 @@ export function parseCycles(
   return bad.length > 0 ? { bad } : { cycles };
 }
 
+export interface GridSpanSpec extends SpanSpec {
+  readonly clock: string;
+}
+
+/**
+ * A grid span, written `1-5:6-10=AMD`. The same form as a daypart with a clock
+ * name on the end, because an operator who has typed one should not have to
+ * learn a second. The split is on the first equals, so a clock whose name has
+ * one in it still reads.
+ */
+export function parseGridSpan(text: string): GridSpanSpec | undefined {
+  const split = text.indexOf('=');
+  if (split < 0) {
+    return undefined;
+  }
+  const clock = text.slice(split + 1).trim();
+  const band = parseDaypart(`span:${text.slice(0, split)}`);
+  const span = band?.spans[0];
+  if (clock === '' || span === undefined) {
+    return undefined;
+  }
+  return { ...span, clock };
+}
+
+export function parseGridSpans(
+  values: readonly string[],
+): { spans: GridSpanSpec[] } | { bad: string[] } {
+  const spans: GridSpanSpec[] = [];
+  const bad: string[] = [];
+  for (const value of values) {
+    const parsed = parseGridSpan(value);
+    if (parsed === undefined) {
+      bad.push(value);
+    } else {
+      spans.push(parsed);
+    }
+  }
+  return bad.length > 0 ? { bad } : { spans };
+}
+
 function collect(value: string, previous: string[]): string[] {
   return [...previous, value];
 }
@@ -162,6 +202,34 @@ export function reportCommand(run: Runner, out: Sink, fail: (lines: string[]) =>
         return;
       }
       out(run('report.health', { dayparts: dayparts.dayparts, cycles: cycles.cycles }));
+    });
+
+  report
+    .command('turnover')
+    .description('how often each category comes round')
+    .option('--span <days:hours=clock>', 'as 1-5:6-10=AMD, repeatable', collect, [] as string[])
+    .option('--name <name>', 'what the grid is called')
+    .action((options: Record<string, unknown>) => {
+      const named = (options['span'] as string[] | undefined) ?? [];
+      if (named.length === 0) {
+        fail(['name at least one grid span, as 1-5:6-10=AMD']);
+        return;
+      }
+      const spans = parseGridSpans(named);
+      if ('bad' in spans) {
+        fail(
+          spans.bad.map((value) => `${value} is not a grid span, which is written 1-5:6-10=AMD`),
+        );
+        return;
+      }
+      out(
+        run('report.turnover', {
+          grid: {
+            spans: spans.spans,
+            ...(options['name'] === undefined ? {} : { name: options['name'] }),
+          },
+        }),
+      );
     });
 
   report

@@ -70,7 +70,8 @@ function harness(): { router: Router } {
     state = { ...state, categories };
   }
   const clocks = new Map(state.clocks);
-  clocks.set('ALL', clockOf(CLOCK));
+  // A clock is stored under its own name, the way the service stores it.
+  clocks.set('ALL', { ...clockOf(CLOCK), name: 'ALL' });
   state = { ...state, library: libraryOf(SONGS), clocks };
 
   const stationService = new StationService(state, journal);

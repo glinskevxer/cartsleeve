@@ -3,6 +3,8 @@ import {
   parseCycles,
   parseDaypart,
   parseDayparts,
+  parseGridSpan,
+  parseGridSpans,
   reportCommand,
 } from '../../src/cli/report-commands.js';
 import type { Runner, Sink } from '../../src/cli/station-commands.js';
@@ -209,5 +211,78 @@ describe('report filings', () => {
     const it0 = spy();
     run(reportCommand(it0.run, it0.out, it0.fail), ['filings']);
     expect(it0.calls[0]).toEqual({ op: 'report.filings', params: {} });
+  });
+});
+
+describe('parseGridSpan', () => {
+  it('reads days, an hour band and a clock', () => {
+    expect(parseGridSpan('1-5:6-10=AMD')).toEqual({
+      days: [1, 2, 3, 4, 5],
+      fromHour: 6,
+      toHour: 10,
+      clock: 'AMD',
+    });
+  });
+
+  it('keeps an equals that is part of the clock name', () => {
+    expect(parseGridSpan('1-5:6-10=A=B')?.clock).toBe('A=B');
+  });
+
+  it('refuses one with no clock', () => {
+    expect(parseGridSpan('1-5:6-10')).toBeUndefined();
+    expect(parseGridSpan('1-5:6-10=')).toBeUndefined();
+  });
+
+  it('refuses one whose band will not read', () => {
+    expect(parseGridSpan('1-5:10-6=AMD')).toBeUndefined();
+  });
+
+  it('names every bad span', () => {
+    const parsed = parseGridSpans(['1-5:6-10=AMD', 'nope', 'also nope']);
+    expect('bad' in parsed && parsed.bad).toHaveLength(2);
+  });
+});
+
+describe('report turnover', () => {
+  it('sends the grid it read', () => {
+    const it0 = spy();
+    run(reportCommand(it0.run, it0.out, it0.fail), [
+      'turnover',
+      '--span',
+      '1-5:6-10=AMD',
+      '--span',
+      '0+6:6-10=WKD',
+    ]);
+    expect(it0.calls[0]?.op).toBe('report.turnover');
+    const grid = it0.calls[0]?.params['grid'] as { spans: unknown[]; name?: string };
+    expect(grid.spans).toHaveLength(2);
+    expect(grid.name).toBeUndefined();
+  });
+
+  it('passes a grid name through when one was given', () => {
+    const it0 = spy();
+    run(reportCommand(it0.run, it0.out, it0.fail), [
+      'turnover',
+      '--span',
+      '1-5:6-10=AMD',
+      '--name',
+      'summer',
+    ]);
+    const grid = it0.calls[0]?.params['grid'] as { name: string };
+    expect(grid.name).toBe('summer');
+  });
+
+  it('sends nothing when no span was named', () => {
+    const it0 = spy();
+    run(reportCommand(it0.run, it0.out, it0.fail), ['turnover']);
+    expect(it0.calls).toHaveLength(0);
+    expect(it0.failures[0]?.[0]).toContain('1-5:6-10=AMD');
+  });
+
+  it('sends nothing when a span will not read', () => {
+    const it0 = spy();
+    run(reportCommand(it0.run, it0.out, it0.fail), ['turnover', '--span', 'nope']);
+    expect(it0.calls).toHaveLength(0);
+    expect(it0.failures[0]?.[0]).toContain('nope');
   });
 });

@@ -48,8 +48,9 @@ function harness(): { router: Router } {
     state = { ...state, categories };
   }
   const clocks = new Map(state.clocks);
-  clocks.set('AMD', musicClock(3));
-  clocks.set('EMPTY', musicClock(2, 'C'));
+  // A clock is stored under its own name, the way the service stores it.
+  clocks.set('AMD', { ...musicClock(3), name: 'AMD' });
+  clocks.set('EMPTY', { ...musicClock(2, 'C'), name: 'EMPTY' });
   state = { ...state, library: libraryOf(SONGS), clocks };
 
   const stationService = new StationService(state, journal);
@@ -200,5 +201,49 @@ describe('the reports and the session', () => {
     call(router, 'schedule.day', { day: { ...DAY, day: 11 }, weekday: 3, clock: 'AMD', hours: 2 });
     const data = call(router, 'report.breaches', {}).data as { lines: string[] };
     expect(data.lines.join('\n')).toContain('2025-06-11');
+  });
+});
+
+describe('report.turnover', () => {
+  const WEEK = [{ days: [0, 1, 2, 3, 4, 5, 6], fromHour: 0, toHour: 24, clock: 'AMD' }];
+
+  it('reads the whole week and prints a page that fits', () => {
+    const { router } = harness();
+    const response = call(router, 'report.turnover', { grid: { spans: WEEK } });
+    expect(response.ok).toBe(true);
+    const data = response.data as { lines: string[]; misleading: string[] };
+    expect(fitsPage(data.lines)).toBe(true);
+    expect(data.lines[0]).toContain('TURNOVER');
+  });
+
+  it('counts the carts it has, category by category', () => {
+    const { router } = harness();
+    const data = call(router, 'report.turnover', { grid: { spans: WEEK } }).data as {
+      lines: string[];
+    };
+    expect(data.lines.join('\n')).toContain('12');
+  });
+
+  it('needs no scheduled day, because turnover is a property of the grid', () => {
+    const { router } = harness();
+    expect(call(router, 'report.turnover', { grid: { spans: WEEK } }).ok).toBe(true);
+  });
+
+  it('refuses a grid naming a clock the station does not have', () => {
+    const { router } = harness();
+    const response = call(router, 'report.turnover', {
+      grid: { spans: [{ ...WEEK[0], clock: 'PMD' }] },
+    });
+    expect(response.ok).toBe(false);
+  });
+
+  it('refuses a grid with no spans at all', () => {
+    const { router } = harness();
+    expect(call(router, 'report.turnover', { grid: { spans: [] } }).ok).toBe(false);
+  });
+
+  it('does not write', () => {
+    const { router } = harness();
+    expect(router.writes('report.turnover')).toBe(false);
   });
 });

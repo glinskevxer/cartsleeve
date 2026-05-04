@@ -18,9 +18,15 @@ import type { Route } from './dispatch.js';
 import { built, route } from './handler.js';
 import { error } from '../util/problem.js';
 import { makeDaypart } from '../domain/daypart.js';
-import type { CategoryCode } from '../util/ids.js';
+import type { CartNumber, CategoryCode } from '../util/ids.js';
 import type { Play } from '../rotation/rest.js';
 import { breachSummary, renderBreaches } from '../report/breach-report.js';
+import { misleading, renderTurnover, turnoverRows } from '../report/turnover-report.js';
+import { demandOf } from '../rotation/turnover.js';
+import { makeGrid } from '../domain/grid.js';
+import type { Grid } from '../domain/grid.js';
+import type { Clock } from '../domain/clock.js';
+import { NO_RESTRICTIONS } from '../library/restriction.js';
 import { firstRemedy, renderHealth } from '../report/health-report.js';
 import type { StationService } from '../service/station-service.js';
 import type { ReportService } from '../service/report-service.js';
@@ -42,6 +48,30 @@ const healthSchema = z.object({
   dayparts: z.array(daypartSchema).min(1),
   cycles: z.array(z.object({ category: z.string(), hours: z.number() })).default([]),
 });
+
+/**
+ * The grid is checked against the clocks the station has, so it is built per
+ * request. Naming a clock that does not exist is a grid problem rather than a
+ * separate lookup in the handler, and saying so once is better than twice.
+ */
+function gridSchema(clocks: readonly Clock[]): z.ZodType<Grid, z.ZodTypeDef, unknown> {
+  return built(
+    z.object({
+      name: z.string().min(1).default('grid'),
+      spans: z
+        .array(
+          z.object({
+            days: z.array(z.number().int().min(0).max(6)).min(1),
+            fromHour: z.number().int().min(0).max(24),
+            toHour: z.number().int().min(0).max(24),
+            clock: z.string().min(1),
+          }),
+        )
+        .min(1),
+    }),
+    (input) => makeGrid(input.name, input.spans, clocks),
+  );
+}
 
 const breachSchema = z.object({
   detailLimit: z.number().int().min(1).optional(),
@@ -108,6 +138,36 @@ export function reportRoutes(
           period: session.label(),
         };
         return succeed(request, { remedy: firstRemedy(input), lines: renderHealth(input) });
+      },
+    }),
+    route({
+      op: 'report.turnover',
+      summary: 'how often each category comes round, and what the average hides',
+      writes: false,
+      params: () => z.object({ grid: gridSchema([...station.current().clocks.values()]) }),
+      answer: (params, request) => {
+        const state = station.current();
+        const byCategory = new Map<CategoryCode, CartNumber[]>();
+        for (const code of state.categories.keys()) {
+          byCategory.set(code, []);
+        }
+        for (const entry of state.library.entries) {
+          const carts = byCategory.get(entry.cart.category);
+          if (carts === undefined) {
+            byCategory.set(entry.cart.category, [entry.cart.number]);
+          } else {
+            carts.push(entry.cart.number);
+          }
+        }
+        const rows = turnoverRows({
+          profile: demandOf(params.grid, [...state.clocks.values()]),
+          restrictions: NO_RESTRICTIONS,
+          categories: [...byCategory].map(([code, carts]) => ({ code, carts })),
+        });
+        return succeed(request, {
+          misleading: misleading(rows).map((row) => row.category),
+          lines: renderTurnover(rows, state.station.callSign),
+        });
       },
     }),
     route({

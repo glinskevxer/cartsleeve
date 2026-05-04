@@ -50,7 +50,13 @@ Tests live under `tests/` and mirror `src/`.
     npm run build
 
 `npm run verify-tree` enforces the layering. An import that points up the stack,
-or a module with no test of its own, fails the lint job.
+or a module with no test of its own, fails its own CI job.
+
+    src/report   sits below traffic, aired and royalty, not above them
+
+Printing is a pure function from values to lines. Putting it at the top of the
+stack would have forced a second copy of the page frame into the royalty filing,
+which is the duplication the frame exists to remove.
 
 ## Requirements
 

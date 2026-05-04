@@ -45,9 +45,10 @@ function harness(): Harness {
     state = { ...state, categories };
   }
   const clocks = new Map(state.clocks);
-  clocks.set('AMD', musicClock(3));
-  clocks.set('OVN', musicClock(2));
-  clocks.set('EMPTY', musicClock(2, 'C'));
+  // A clock is stored under its own name, the way the service stores it.
+  clocks.set('AMD', { ...musicClock(3), name: 'AMD' });
+  clocks.set('OVN', { ...musicClock(2), name: 'OVN' });
+  clocks.set('EMPTY', { ...musicClock(2, 'C'), name: 'EMPTY' });
   state = { ...state, library: libraryOf(SONGS), clocks };
 
   const stationService = new StationService(state, journal);
