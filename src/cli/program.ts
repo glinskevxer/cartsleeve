@@ -23,6 +23,7 @@ import { clockRoutes } from '../api/clock-handlers.js';
 import { ScheduleSession, scheduleRoutes } from '../api/schedule-handlers.js';
 import { reportRoutes } from '../api/report-handlers.js';
 import { trafficRoutes } from '../api/traffic-handlers.js';
+import { airedRoutes } from '../api/aired-handlers.js';
 import { ScheduleService } from '../service/schedule-service.js';
 import { ReportService } from '../service/report-service.js';
 import { StationService } from '../service/station-service.js';
@@ -34,6 +35,7 @@ import { libraryCommand, categoryCommand, clockCommand } from './station-command
 import type { ReadFile } from './schedule-commands.js';
 import { scheduleCommand, trafficCommand } from './schedule-commands.js';
 import { reportCommand } from './report-commands.js';
+import { airedCommand } from './aired-commands.js';
 
 export const VERSION = '0.15.0';
 
@@ -77,12 +79,14 @@ export function buildProgram(input: ProgramInput): BuiltProgram {
   const clock = input.now ?? ((): number => Date.now());
   const stationService = new StationService(input.state, input.journal);
   const session = new ScheduleSession();
+  const reportService = new ReportService(input.journal);
   const router = new Router([
     ...libraryRoutes(stationService),
     ...clockRoutes(stationService),
     ...scheduleRoutes(stationService, new ScheduleService(input.journal), session),
-    ...reportRoutes(stationService, new ReportService(input.journal), session),
+    ...reportRoutes(stationService, reportService, session),
     ...trafficRoutes(stationService, session),
+    ...airedRoutes(stationService, reportService, session),
   ]);
 
   const program = new Command('cartsleeve')
@@ -128,6 +132,9 @@ export function buildProgram(input: ProgramInput): BuiltProgram {
   program.addCommand(scheduleCommand(run, show, fail));
   program.addCommand(trafficCommand(run, show, fail, input.readFile));
   program.addCommand(reportCommand(run, show, fail));
+  program.addCommand(
+    airedCommand({ run, out: show, fail, note: input.write, readFile: input.readFile }),
+  );
 
   program
     .command('ops')

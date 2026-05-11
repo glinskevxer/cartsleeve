@@ -80,6 +80,8 @@ describe('the program', () => {
     expect(ops).toContain('schedule.day');
     expect(ops).toContain('traffic.merge');
     expect(ops).toContain('report.health');
+    expect(ops).toContain('aired.reconcile');
+    expect(ops).toContain('royalty.file');
   });
 
   it('marks which operations write', () => {
